@@ -1,0 +1,551 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>QtHOGClass</class>
+ <widget class="QMainWindow" name="QtHOGClass">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>588</width>
+    <height>454</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Masquerade</string>
+  </property>
+  <widget class="QWidget" name="centralWidget">
+   <layout class="QVBoxLayout" name="verticalLayout_2">
+    <item>
+     <layout class="QHBoxLayout" name="horizontalLayout" stretch="10,0">
+      <item>
+       <widget class="QSlider" name="sliderFrame">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="editFrame">
+        <property name="maximumSize">
+         <size>
+          <width>80</width>
+          <height>16777215</height>
+         </size>
+        </property>
+        <property name="inputMask">
+         <string/>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <layout class="QHBoxLayout" name="horizontalLayoutImage" stretch="1,3">
+      <property name="spacing">
+       <number>0</number>
+      </property>
+      <item>
+       <widget class="QListWidget" name="listWidgetBatch">
+        <property name="maximumSize">
+         <size>
+          <width>0</width>
+          <height>16777215</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="MercatorView" name="imageView" native="true"/>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <layout class="QHBoxLayout" name="horizontalLayout_4" stretch="0,0,0,10">
+      <item>
+       <widget class="QGroupBox" name="objectType">
+        <property name="title">
+         <string>Object Type</string>
+        </property>
+        <layout class="QHBoxLayout" name="horizontalLayout_5">
+         <item>
+          <widget class="QCheckBox" name="checkBoxFace">
+           <property name="text">
+            <string>Face</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QCheckBox" name="checkBoxPlate">
+           <property name="text">
+            <string>Plate</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item>
+       <layout class="QVBoxLayout" name="verticalLayout">
+        <property name="spacing">
+         <number>0</number>
+        </property>
+        <item>
+         <widget class="QCheckBox" name="checkBoxAutoFocus">
+          <property name="autoFillBackground">
+           <bool>false</bool>
+          </property>
+          <property name="text">
+           <string>Auto Focus(Key 'R' and 'E')</string>
+          </property>
+          <property name="checked">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_2">
+          <item>
+           <widget class="QCheckBox" name="checkBoxAutoScale">
+            <property name="text">
+             <string>Auto scale</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QSlider" name="sliderScale">
+            <property name="enabled">
+             <bool>false</bool>
+            </property>
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimum">
+             <number>20</number>
+            </property>
+            <property name="maximum">
+             <number>500</number>
+            </property>
+            <property name="value">
+             <number>100</number>
+            </property>
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="labelScale">
+            <property name="text">
+             <string>100</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QPushButton" name="pushButtonManualDetect">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>36</width>
+          <height>36</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>36</width>
+          <height>36</height>
+         </size>
+        </property>
+        <property name="autoFillBackground">
+         <bool>true</bool>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="icon">
+         <iconset resource="qthog.qrc">
+          <normaloff>:/Icon/AddIcon</normaloff>:/Icon/AddIcon</iconset>
+        </property>
+        <property name="iconSize">
+         <size>
+          <width>28</width>
+          <height>28</height>
+         </size>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+        <property name="flat">
+         <bool>false</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="horizontalSpacer">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>308</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menuBar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>588</width>
+     <height>21</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menuFile">
+    <property name="title">
+     <string>File</string>
+    </property>
+    <widget class="QMenu" name="menuRead_Each">
+     <property name="title">
+      <string>Read Each</string>
+     </property>
+     <addaction name="actionRead_Image"/>
+     <addaction name="actionRead_Objects"/>
+     <addaction name="actionRead_SVM_Data"/>
+    </widget>
+    <addaction name="menuRead_Each"/>
+    <addaction name="actionWrite_Objects"/>
+    <addaction name="actionExport_Masked_Images"/>
+    <addaction name="actionForce_Auto_Save"/>
+    <addaction name="separator"/>
+    <addaction name="actionQuit"/>
+   </widget>
+   <widget class="QMenu" name="menuTest">
+    <property name="title">
+     <string>Detect</string>
+    </property>
+    <addaction name="actionDetect_Faces"/>
+    <addaction name="actionFace_CV_Tracking"/>
+    <addaction name="actionSet_Color_Threshold"/>
+   </widget>
+   <widget class="QMenu" name="menuShow">
+    <property name="title">
+     <string>Show</string>
+    </property>
+    <addaction name="actionShow_Faces"/>
+    <addaction name="actionShowBatch_Dialog"/>
+   </widget>
+   <widget class="QMenu" name="menuTest_2">
+    <property name="title">
+     <string>Test</string>
+    </property>
+    <addaction name="actionSVM_Learning"/>
+    <addaction name="actionClear_Objects"/>
+   </widget>
+   <widget class="QMenu" name="menuSetting">
+    <property name="title">
+     <string>Setting</string>
+    </property>
+    <widget class="QMenu" name="menuSet_Blur_Intensity">
+     <property name="title">
+      <string>Set Blur Intensity</string>
+     </property>
+     <addaction name="actionSet_Blur_Intensity_For_Faces"/>
+     <addaction name="actionSet_Blur_Intensity_For_Plates"/>
+    </widget>
+    <addaction name="menuSet_Blur_Intensity"/>
+   </widget>
+   <widget class="QMenu" name="menuHelp">
+    <property name="title">
+     <string>Help</string>
+    </property>
+    <addaction name="actionAbout_Masquerade"/>
+   </widget>
+   <widget class="QMenu" name="menuEdit">
+    <property name="title">
+     <string>Edit</string>
+    </property>
+    <addaction name="actionSelect_All"/>
+   </widget>
+   <addaction name="menuFile"/>
+   <addaction name="menuEdit"/>
+   <addaction name="menuTest"/>
+   <addaction name="menuShow"/>
+   <addaction name="menuSetting"/>
+   <addaction name="menuTest_2"/>
+   <addaction name="menuHelp"/>
+  </widget>
+  <widget class="QStatusBar" name="statusBar"/>
+  <action name="actionQuit">
+   <property name="text">
+    <string>Quit</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+Q</string>
+   </property>
+  </action>
+  <action name="actionRead_Image">
+   <property name="text">
+    <string>Read Image...</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+1</string>
+   </property>
+  </action>
+  <action name="actionDetect_HOG">
+   <property name="text">
+    <string>Detect HOG</string>
+   </property>
+  </action>
+  <action name="actionWrite_Objects">
+   <property name="text">
+    <string>Write Objects...</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+Shift+S</string>
+   </property>
+  </action>
+  <action name="actionRead_Objects">
+   <property name="text">
+    <string>Read Objects...</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+2</string>
+   </property>
+  </action>
+  <action name="actionDetect_HOG_All">
+   <property name="text">
+    <string>Detect HOG All</string>
+   </property>
+  </action>
+  <action name="actionDetect_Face">
+   <property name="text">
+    <string>Detect Face</string>
+   </property>
+  </action>
+  <action name="actionNext_Objects">
+   <property name="text">
+    <string>Next Objects</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+N</string>
+   </property>
+  </action>
+  <action name="actionSkin_Detect">
+   <property name="text">
+    <string>Skin Detect</string>
+   </property>
+  </action>
+  <action name="actionFace_Tracking">
+   <property name="text">
+    <string>Face Tracking</string>
+   </property>
+  </action>
+  <action name="actionRead_ICV">
+   <property name="text">
+    <string>Read ICV...</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+3</string>
+   </property>
+  </action>
+  <action name="actionFace_CV_Tracking">
+   <property name="text">
+    <string>Track Faces</string>
+   </property>
+  </action>
+  <action name="actionShow_skin_score">
+   <property name="text">
+    <string>Show skin score</string>
+   </property>
+  </action>
+  <action name="actionShow_Faces">
+   <property name="text">
+    <string>Show Faces</string>
+   </property>
+  </action>
+  <action name="actionRead_Project_File">
+   <property name="text">
+    <string>Read Project File...</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+O</string>
+   </property>
+  </action>
+  <action name="actionExtract_MSER">
+   <property name="text">
+    <string>Extract MSER</string>
+   </property>
+  </action>
+  <action name="actionQuickShift">
+   <property name="text">
+    <string>QuickShift</string>
+   </property>
+  </action>
+  <action name="actionQuickShiftSave">
+   <property name="text">
+    <string>QuickShiftSave</string>
+   </property>
+  </action>
+  <action name="actionQuickEdison">
+   <property name="text">
+    <string>QuickEdison</string>
+   </property>
+  </action>
+  <action name="actionExport_Masked_Images">
+   <property name="text">
+    <string>Export Masked Images...</string>
+   </property>
+  </action>
+  <action name="actionShow_Skin_Color">
+   <property name="text">
+    <string>Show Skin Color</string>
+   </property>
+  </action>
+  <action name="actionSkin_Sampling">
+   <property name="text">
+    <string>Skin Sampling</string>
+   </property>
+  </action>
+  <action name="actionSet_Color_Threshold">
+   <property name="text">
+    <string>Set SVM Threshold...</string>
+   </property>
+  </action>
+  <action name="actionSVM_Learning">
+   <property name="text">
+    <string>SVM Learning...</string>
+   </property>
+  </action>
+  <action name="actionSVM_Test">
+   <property name="text">
+    <string>SVM Test</string>
+   </property>
+  </action>
+  <action name="actionTest_GpuHog">
+   <property name="text">
+    <string>Test GpuHog</string>
+   </property>
+  </action>
+  <action name="actionDetect_Faces">
+   <property name="text">
+    <string>Detect Faces</string>
+   </property>
+  </action>
+  <action name="actionClear_Objects">
+   <property name="text">
+    <string>Clear Objects</string>
+   </property>
+  </action>
+  <action name="actionShowBatch_Dialog">
+   <property name="text">
+    <string>Batch Dialog</string>
+   </property>
+  </action>
+  <action name="actionForce_Auto_Save">
+   <property name="text">
+    <string>Force Auto Save</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+S</string>
+   </property>
+  </action>
+  <action name="actionHaar_Detect_Test">
+   <property name="text">
+    <string>Haar Detect Test</string>
+   </property>
+  </action>
+  <action name="actionHead_Shoulder_SVM_Learning">
+   <property name="text">
+    <string>Head Shoulder SVM Learning...</string>
+   </property>
+  </action>
+  <action name="actionRead_SVM_Data">
+   <property name="text">
+    <string>Read SVM Data...</string>
+   </property>
+  </action>
+  <action name="actionDetect_Head_Shoulder">
+   <property name="text">
+    <string>Detect Head Shoulder</string>
+   </property>
+  </action>
+  <action name="actionPCA_with_samples">
+   <property name="text">
+    <string>PCA with samples...</string>
+   </property>
+  </action>
+  <action name="actionShrink_Tracking_Data">
+   <property name="text">
+    <string>Shrink Tracking Data...</string>
+   </property>
+  </action>
+  <action name="actionSet_Blur_Intensity_For_Faces">
+   <property name="text">
+    <string>for Faces...</string>
+   </property>
+  </action>
+  <action name="actionSet_Blur_Intensity_For_Plates">
+   <property name="text">
+    <string>for Plates...</string>
+   </property>
+  </action>
+  <action name="actionAbout_Masquerade">
+   <property name="text">
+    <string>About Masquerade</string>
+   </property>
+  </action>
+  <action name="actionSelect_All">
+   <property name="text">
+    <string>Select All</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+A</string>
+   </property>
+  </action>
+ </widget>
+ <layoutdefault spacing="6" margin="11"/>
+ <customwidgets>
+  <customwidget>
+   <class>MercatorView</class>
+   <extends>QWidget</extends>
+   <header>MercatorView.h</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources>
+  <include location="qthog.qrc"/>
+ </resources>
+ <connections/>
+ <slots>
+  <slot>checkBoxType_clicked()</slot>
+ </slots>
+</ui>

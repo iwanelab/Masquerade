@@ -1,0 +1,16 @@
+<RCC>
+    <qresource prefix="/QtHOG"/>
+    <qresource prefix="/Icon">
+        <file alias="AppIcon">Resources/app_icon.ico</file>
+        <file alias="QuestionIcon">Resources/blue64_q.png</file>
+        <file alias="AddIcon">Resources/notification_add.png</file>
+        <file alias="ArrowRight">Resources/direction_right.png</file>
+        <file alias="RemoveIcon">Resources/notification_remove.png</file>
+        <file alias="FileAdd">Resources/file_add.png</file>
+        <file alias="FileDelete">Resources/file_delete.png</file>
+        <file alias="Clock">Resources/clock.png</file>
+        <file alias="Done">Resources/notification_done.png</file>
+        <file alias="Warning">Resources/notification_warning.png</file>
+        <file alias="Disc">Resources/disc.png</file>
+    </qresource>
+</RCC>

@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>DlgFaceGridClass</class>
+ <widget class="QMainWindow" name="DlgFaceGridClass">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>549</width>
+    <height>401</height>
+   </rect>
+  </property>
+  <property name="focusPolicy">
+   <enum>Qt::NoFocus</enum>
+  </property>
+  <property name="windowTitle">
+   <string>DlgFaceGrid</string>
+  </property>
+  <widget class="QWidget" name="centralWidget">
+   <layout class="QGridLayout" name="gridLayout">
+    <item row="0" column="0">
+     <widget class="FaceGridView" name="faceGridView"/>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menuBar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>549</width>
+     <height>24</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menuLearning">
+    <property name="title">
+     <string>Learning</string>
+    </property>
+    <addaction name="actionExport_as_positive_samples"/>
+    <addaction name="actionExport_as_negative_samples"/>
+<!--
+    <addaction name="separator"/>
+    <addaction name="actionExport_as_positive_samples_HS"/>
+    <addaction name="actionExport_as_negative_samples_HS"/>
+-->
+  </widget>
+   <widget class="QMenu" name="menuView">
+    <property name="title">
+     <string>View</string>
+    </property>
+    <addaction name="actionIgnore_Frame"/>
+   </widget>
+   <addaction name="menuView"/>
+   <addaction name="menuLearning"/>
+  </widget>
+  <action name="actionSelect_Object">
+   <property name="text">
+    <string>Select Object</string>
+   </property>
+  </action>
+  <action name="actionAuto_Tracking">
+   <property name="text">
+    <string>Auto Tracking</string>
+   </property>
+  </action>
+  <action name="actionMerge">
+   <property name="text">
+    <string>Merge</string>
+   </property>
+  </action>
+  <action name="actionExport_as_negative_samples">
+   <property name="text">
+    <string>Export as negative samples...</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+N</string>
+   </property>
+   <property name="menuRole">
+    <enum>QAction::NoRole</enum>
+   </property>
+  </action>
+  <action name="actionExport_as_positive_samples">
+   <property name="text">
+    <string>Export as positive samples...</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+P</string>
+   </property>
+  </action>
+  <action name="actionSelect_before_cursor">
+   <property name="text">
+    <string>Select before this</string>
+   </property>
+  </action>
+  <action name="actionSelect_after_cursor">
+   <property name="text">
+    <string>Select after this</string>
+   </property>
+  </action>
+  <action name="actionJump_to_head">
+   <property name="text">
+    <string>Jump to head(&amp;W)</string>
+   </property>
+   <property name="toolTip">
+    <string>Jump to head(&amp;W)</string>
+   </property>
+  </action>
+  <action name="actionJump_to_tail">
+   <property name="text">
+    <string>Jump to tail(&amp;E)</string>
+   </property>
+   <property name="toolTip">
+    <string>Jump to tail(&amp;E)</string>
+   </property>
+  </action>
+  <action name="actionMove_Up">
+   <property name="text">
+    <string>Move Up</string>
+   </property>
+  </action>
+  <action name="actionMove_Down">
+   <property name="text">
+    <string>Move Down</string>
+   </property>
+  </action>
+  <action name="actionMove_Left">
+   <property name="text">
+    <string>Move Left</string>
+   </property>
+  </action>
+  <action name="actionMove_Right">
+   <property name="text">
+    <string>Move Right</string>
+   </property>
+  </action>
+  <action name="actionShrink">
+   <property name="text">
+    <string>Shrink</string>
+   </property>
+  </action>
+  <action name="actionEnlarge">
+   <property name="text">
+    <string>Expand</string>
+   </property>
+  </action>
+  <action name="actionDelete_Object">
+   <property name="text">
+    <string>&amp;Delete Object(D)</string>
+   </property>
+   <property name="iconText">
+    <string>&amp;Delete Object</string>
+   </property>
+   <property name="toolTip">
+    <string>&amp;Delete Object</string>
+   </property>
+   <property name="shortcut">
+    <string>Shift+Del</string>
+   </property>
+   <property name="shortcutContext">
+    <enum>Qt::WindowShortcut</enum>
+   </property>
+   <property name="softKeyRole">
+    <enum>QAction::NoSoftKey</enum>
+   </property>
+  </action>
+  <action name="actionDelete_before_this">
+   <property name="text">
+    <string>Delete before this(&amp;S)</string>
+   </property>
+   <property name="toolTip">
+    <string>Delete before this(&amp;S)</string>
+   </property>
+  </action>
+  <action name="actionDelete_after_this">
+   <property name="text">
+    <string>Delete after this(&amp;F)</string>
+   </property>
+   <property name="toolTip">
+    <string>Delete after this(&amp;F)</string>
+   </property>
+  </action>
+  <action name="actionIgnore_Frame">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Ignore Frame</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+I</string>
+   </property>
+  </action>
+  <action name="actionExport_as_positive_samples_HS">
+   <property name="text">
+    <string>Export as positive samples HS...</string>
+   </property>
+  </action>
+  <action name="actionExport_as_negative_samples_HS">
+   <property name="text">
+    <string>Export as negative samples HS...</string>
+   </property>
+  </action>
+ </widget>
+ <layoutdefault spacing="6" margin="11"/>
+ <customwidgets>
+  <customwidget>
+   <class>FaceGridView</class>
+   <extends>QGraphicsView</extends>
+   <header>FaceGridView.h</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

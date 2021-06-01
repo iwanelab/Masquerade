@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>DlgSkinColorClass</class>
+ <widget class="QMainWindow" name="DlgSkinColorClass">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>502</width>
+    <height>473</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>DlgSkinColor</string>
+  </property>
+  <widget class="QWidget" name="centralWidget">
+   <layout class="QVBoxLayout" name="verticalLayout" stretch="1,0">
+    <item>
+     <widget class="ColorDistView" name="imageView" native="true"/>
+    </item>
+    <item>
+     <layout class="QHBoxLayout" name="horizontalLayout">
+      <item>
+       <widget class="QCheckBox" name="checkBoxAutoScaleSkin">
+        <property name="text">
+         <string>Auto scale</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QSlider" name="sliderScaleSkin">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimum">
+         <number>20</number>
+        </property>
+        <property name="maximum">
+         <number>500</number>
+        </property>
+        <property name="value">
+         <number>100</number>
+        </property>
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="labelScaleSkin">
+        <property name="text">
+         <string>100</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="horizontalSpacer">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>198</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menuBar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>502</width>
+     <height>24</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menuFile">
+    <property name="title">
+     <string>File</string>
+    </property>
+    <widget class="QMenu" name="menuRead">
+     <property name="title">
+      <string>Read</string>
+     </property>
+     <addaction name="actionRead_Samples"/>
+     <addaction name="actionRead_Single_Gauss"/>
+    </widget>
+    <widget class="QMenu" name="menuWrite">
+     <property name="title">
+      <string>Write</string>
+     </property>
+     <addaction name="actionWrite_Samples"/>
+     <addaction name="actionWrite_Single_Gauss"/>
+    </widget>
+    <addaction name="menuRead"/>
+    <addaction name="menuWrite"/>
+   </widget>
+   <widget class="QMenu" name="menuClassify">
+    <property name="title">
+     <string>Classify</string>
+    </property>
+    <addaction name="actionGauss_Fitting"/>
+    <addaction name="actionClear_Data"/>
+   </widget>
+   <addaction name="menuFile"/>
+   <addaction name="menuClassify"/>
+  </widget>
+  <action name="actionRead_Samples">
+   <property name="text">
+    <string>Read Samples...</string>
+   </property>
+  </action>
+  <action name="actionWrite_Samples">
+   <property name="text">
+    <string>Write Samples...</string>
+   </property>
+  </action>
+  <action name="actionGauss_Fitting">
+   <property name="text">
+    <string>Gauss Fitting</string>
+   </property>
+  </action>
+  <action name="actionClear_Data">
+   <property name="text">
+    <string>Clear Data</string>
+   </property>
+  </action>
+  <action name="actionRead_Single_Gauss">
+   <property name="text">
+    <string>Read Single Gauss...</string>
+   </property>
+  </action>
+  <action name="actionWrite_Single_Gauss">
+   <property name="text">
+    <string>Write Single Gauss...</string>
+   </property>
+  </action>
+ </widget>
+ <layoutdefault spacing="6" margin="11"/>
+ <customwidgets>
+  <customwidget>
+   <class>ColorDistView</class>
+   <extends>QWidget</extends>
+   <header>ColorDistView.h</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>
