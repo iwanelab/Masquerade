@@ -269,7 +269,7 @@ void DlgFaces::execMerge()
 				if (it->second == itr->object)
 					continue;
 
-				itNew = m_pStructData->insertRegion(itr->camera, itr->frame, it->second, itr->rect, SRegion::TypeFace);
+				itNew = m_pStructData->insertRegion(itr->camera, itr->frame, it->second, itr->rect, itr->type);
 				m_pStructData->setRegionFlags(itNew, itr->flags);
 
 				if (m_pSelectedItems->find(it->first) != m_pSelectedItems->end())

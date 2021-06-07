@@ -187,7 +187,7 @@ void IplImageView::mousePressEvent ( QMouseEvent * event )// {qDebug() << "press
 		foreach(item, itms)
 		{
 			RectItem *rect = (RectItem*)item;
-			if (rect->getType() == SRegion::TypeFace)
+			//if (rect->getType() == SRegion::TypeFace)
 				++faceCount;
 		}
 		if (faceCount > 0)

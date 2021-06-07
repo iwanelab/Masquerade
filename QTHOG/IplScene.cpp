@@ -79,8 +79,8 @@ void IplScene::mouseMoveEvent(QGraphicsSceneMouseEvent *mouseEvent)
 		foreach(item, items)
 		{
 			RectItem *rect = (RectItem*)item;
-			if (rect->getType() != SRegion::TypeFace && rect->getType() != SRegion::TypePlate)
-				continue;
+			//if (rect->getType() != SRegion::TypeFace && rect->getType() != SRegion::TypePlate)
+			//	continue;
 
 			if (!rect->bSelected())
 				continue;

@@ -18,6 +18,7 @@
 
 // マスク処理用
 #include "EnmaskImageAccessor.h"
+#include "ProjectionImageAccessor.h"
 
 #define _CRTDBG_MAP_ALLOC
 
@@ -47,7 +48,7 @@ private:
 	//GPU
 	// なぜかcv::gpu::gpiMatのコンストラクタで戻ってこなくなるため未使用にする。（動くときもある？）
 	//const bool useGPU = cv::gpu::getCudaEnabledDeviceCount() > 0;
-	bool m_useGPU;					// USE_GPU
+	//bool m_useGPU;					// USE_GPU
 
 	//jpeg Q
 	int m_JpegQuality;				// JPEG_QUALITY
@@ -115,6 +116,9 @@ private:
 	// オブジェクトファイル名
 	QString m_objectfile;
 
+	// 平面展開処理
+	CProjectionImageAccessor m_projectionImage;
+
 signals:
 	void sgSelectionChanged();
 	void sgImageChanged(const std::vector<int> &changedImages, bool bSelect);
@@ -166,8 +170,6 @@ private slots:
 	void on_actionSet_Color_Threshold_triggered();
 	void on_actionSVM_Learning_triggered();
 	void on_actionHead_Shoulder_SVM_Learning_triggered();
-	void on_actionSVM_Test_triggered();
-	void on_actionTest_GpuHog_triggered();
 	void on_actionClear_Objects_triggered();
 	void on_actionShowBatch_Dialog_triggered();
 	void on_actionForce_Auto_Save_triggered();

@@ -61,8 +61,8 @@ void ObjectFaceView::calcGrid()
 
 		for (itr = m_pStructData->regionBegin(*its); itr != m_pStructData->regionEnd(); ++itr)
 		{
-			if (itr->type != SRegion::TypeFace)
-				continue;
+			//if (itr->type != SRegion::TypeFace)
+			//	continue;
 
 			if (itr->rect.height + FaceMargin > maxHeight)
 				maxHeight = itr->rect.height + FaceMargin;
@@ -163,8 +163,8 @@ void ObjectFaceView::updateView(bool bCenterOn)
 
 		for (itr = m_pStructData->regionBegin(*its); itr != m_pStructData->regionEnd(); ++itr)
 		{
-			if (itr->type != SRegion::TypeFace)
-				continue;
+			//if (itr->type != SRegion::TypeFace)
+			//	continue;
 
 			int frame = itr->frame;
 

@@ -53,8 +53,8 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,5,11,0
- PRODUCTVERSION 1,5,11,0
+ FILEVERSION 1,5,12,0
+ PRODUCTVERSION 1,5,12,0
  FILEFLAGSMASK 0x17L
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -71,12 +71,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Iwane Laboratories, Ltd."
             VALUE "FileDescription", "Masquerade.exe"
-            VALUE "FileVersion", "1, 5, 11, 0"
+            VALUE "FileVersion", "1, 5, 12, 0"
             VALUE "InternalName", "Masquerade"
             VALUE "LegalCopyright", "Iwane CVTechnology, Copyright (C) 2012-2021 Iwane Laboratories, Ltd."
             VALUE "OriginalFilename", "Masquerade.exe"
             VALUE "ProductName", "Masquerade.exe"
-            VALUE "ProductVersion", "1, 5, 11, 0"
+            VALUE "ProductVersion", "1, 5, 12, 0"
         END
     END
     BLOCK "VarFileInfo"
