@@ -1,25 +1,14 @@
 #pragma once
-#include "SecuwatcherConstants.h"
-#ifdef SECUWATCHERMASK_EXE
-#include "SecuwatcherMaskSDK_class.hpp"
-#endif
+#include "ExternalDetector.h"
 
-class CSecuwatcherMask
+class CSecuwatcherMaskDetector
+	: CExternalDetector
 {
 public:
 	CSecuwatcherMask();
-	CSecuwatcherMask(TCHAR *secuwatcherPath);
-	~CSecuwatcherMask(void);
+	virtual ~CSecuwatcherMask(void);
 
-#ifdef SECUWATCHERMASK_EXE
-	int OnSetParameters(HWND hWnd, PCOPYDATASTRUCT lpData);
-	int OnDetect(HWND hWnd, PCOPYDATASTRUCT lpData);
-#endif
-
-	bool setParameters(secuwatcher_access::detectParam &parameters);
-	bool detect(cv::Mat image, std::vector<secuwatcher_access::detectedData> &result);
-	void setMaxDetectedData(size_t maxDetectedData){m_maxDetectedData = maxDetectedData;};
-	void setWindowHandle(HWND hWnd)	{m_hWnd = hWnd;};
+	virtual bool setParameters(secuwatcher_access::detectParam &parameters);
 private:
 	struct ProcessMessageInfo {
 		DWORD processID;
@@ -47,5 +36,4 @@ private:
 	MSDK_Detector *m_pModel[3];
 #endif
 public:
-	bool initChildProcess(TCHAR * secuwatcherPath);
 };

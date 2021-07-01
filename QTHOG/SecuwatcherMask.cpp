@@ -83,10 +83,14 @@ bool CSecuwatcherMask::setParameters(secuwatcher_access::detectParam &parameters
 			{
 				if (!PathFileExists(m_paramDetect.model[i].cfgFilename))
 				{
+					TCHAR msg[512];
+					
+					MessageBox(m_hWnd, (std::wstring(_T("Path not exist - "))+ std::wstring(m_paramDetect.model[i].cfgFilename)).c_str(), _T("setParameters"), MB_OK);
 					return false;
 				}
 				if (!PathFileExists(m_paramDetect.model[i].weightFilename))
 				{
+					MessageBox(m_hWnd, (std::wstring(_T("Path not exist - ")) + std::wstring(m_paramDetect.model[i].weightFilename)).c_str(), _T("setParameters"), MB_OK);
 					return false;
 				}
 			}
@@ -113,9 +117,17 @@ bool CSecuwatcherMask::setParameters(secuwatcher_access::detectParam &parameters
 
 			if (m_paramDetect.model[i].valid)
 			{
-				if (!PathFileExists(m_paramDetect.model[i].cfgFilename) || !PathFileExists(m_paramDetect.model[i].weightFilename))
+				if (!PathFileExists(m_paramDetect.model[i].cfgFilename))
+				{
+					MessageBox(m_hWnd, (std::wstring(_T("Path not exist - ")) + std::wstring(m_paramDetect.model[i].cfgFilename)).c_str(), _T("setParameters"), MB_OK);
 					return false;
-				try 
+				}
+				if (!PathFileExists(m_paramDetect.model[i].weightFilename))
+				{
+					MessageBox(m_hWnd, (std::wstring(_T("Path not exist - ")) + std::wstring(m_paramDetect.model[i].weightFilename)).c_str(), _T("setParameters"), MB_OK);
+					return false;
+				}
+				try
 				{
 					m_pModel[i] = new MSDK_Detector(m_paramDetect.model[i].cfgFilename, m_paramDetect.model[i].weightFilename);
 				}
@@ -142,12 +154,16 @@ bool CSecuwatcherMask::detect(cv::Mat image, std::vector<secuwatcher_access::det
 	{
 		COPYDATASTRUCT msgData;
 		if (!setImage(image, msgData))
+		{
+			MessageBox(NULL, _T("setImage error"), _T("CSecuwatcherMask::detect"), MB_OK);
 			return false;
+		}
 		secuwatcher_access::detectMessage *pDetectMessage = reinterpret_cast<secuwatcher_access::detectMessage *>(msgData.lpData);
 		HANDLE hMapFile = CreateFileMappingA( (HANDLE)(-1), NULL, PAGE_READWRITE, 0,  static_cast<DWORD>(pDetectMessage->mapfileSize), pDetectMessage->mapfileDetectedData);
 		if (hMapFile == NULL)
 		{
 			delete msgData.lpData;
+			MessageBox(NULL, _T("CreateFileMappingA error"), _T("CSecuwatcherMask::detect"), MB_OK);
 			return false;
 		}
 		LRESULT retMsg;
@@ -156,6 +172,7 @@ bool CSecuwatcherMask::detect(cv::Mat image, std::vector<secuwatcher_access::det
 		{
 			delete msgData.lpData;
 			CloseHandle(hMapFile);
+			MessageBox(NULL, _T("sendProcessMessage error"), _T("CSecuwatcherMask::detect"), MB_OK);
 			return false;
 		}
 		if (retMsg == secuwatcher_access::DETECT_NOT_ENOUGH_MEMORY)
@@ -230,15 +247,22 @@ bool CSecuwatcherMask::setImage(cv::Mat image, COPYDATASTRUCT &msgData)
 
 bool CSecuwatcherMask::sendProcessMessage(DWORD dwProcessId, LRESULT &result, unsigned int Msg, WPARAM wParam, LPARAM lParam)
 {
+	MessageBox(NULL, _T("sendProcessMessage"), _T("sendProcessMessage"), MB_OK);
 	if ((dwProcessId == 0) || (dwProcessId == 4))	// System Idle StateとSystemには送らない。
+	{
+		MessageBox(NULL, _T("process id is unavailable."), _T("sendProcessMessage"), MB_OK);
 		return FALSE;
+	}
 	struct ProcessMessageInfo msgInfo;
 	msgInfo.processID = dwProcessId;
 	msgInfo.Msg = Msg;
 	msgInfo.wParam = wParam;
 	msgInfo.lParam = lParam;
 	if (::EnumWindows(EnumWindowsProc, reinterpret_cast<LPARAM>(&msgInfo)))
+	{
+		MessageBox(NULL, _T("EnumWindowsProc error."), _T("sendProcessMessage"), MB_OK);
 		return false;
+	}
 	result = msgInfo.result;
 	return true;
 }
@@ -250,6 +274,7 @@ BOOL CALLBACK CSecuwatcherMask::EnumWindowsProc(HWND hWnd, LPARAM lParam)
 	::GetWindowThreadProcessId(hWnd, &dwProcessId);
 	if(pMsgInfo->processID == dwProcessId)
 	{
+		MessageBox(NULL, _T("find process."), _T("EnumWindowsProc"), MB_OK);
 		pMsgInfo->result = ::SendMessage(hWnd, pMsgInfo->Msg, pMsgInfo->wParam, pMsgInfo->lParam);
 		return FALSE;
 	}
@@ -259,49 +284,78 @@ BOOL CALLBACK CSecuwatcherMask::EnumWindowsProc(HWND hWnd, LPARAM lParam)
 #ifdef SECUWATCHERMASK_EXE
 int CSecuwatcherMask::OnSetParameters(HWND hWnd, PCOPYDATASTRUCT lpData)
 {
+	MessageBox(NULL, _T("OnSetParameters"), _T("debug"), MB_OK);
 	if (!setParameters(*reinterpret_cast<secuwatcher_access::detectParam *>(lpData->lpData)))
 		return -1;
+	MessageBox(NULL, _T("OnSetParameters end"), _T("debug"), MB_OK);
 	return 0;
 }
 
 int CSecuwatcherMask::OnDetect(HWND hWnd, PCOPYDATASTRUCT lpData)
 {
-	secuwatcher_access::detectMessage *pDetectMessage = static_cast<secuwatcher_access::detectMessage *>(lpData->lpData);
-	cv::Mat image(pDetectMessage->imageHeader.rows, pDetectMessage->imageHeader.cols, pDetectMessage->imageHeader.type, pDetectMessage->imageData, pDetectMessage->imageHeader.step);
-	std::vector<secuwatcher_access::detectedData> resultData;
-	// 検出処理
-	if (!detect(image, resultData))
-		return secuwatcher_access::DETECT_DETECT_ERROR;
-	// メモリマップドファイルオープン
-	HANDLE hMapFile = OpenFileMappingA(FILE_MAP_WRITE, FALSE, pDetectMessage->mapfileDetectedData);
-	if (hMapFile == NULL)
-		return secuwatcher_access::DETECT_MAPFILE_ERROR;
-	void *lpOutput = MapViewOfFile(hMapFile, FILE_MAP_WRITE, 0, 0, 0);
-	if (lpOutput == NULL)
+	MessageBox(NULL, _T("OnDetect"), _T("debug"), MB_OK);
+	int result = secuwatcher_access::DETECT_MAPFILE_ERROR;
+	try
 	{
+		secuwatcher_access::detectMessage *pDetectMessage = static_cast<secuwatcher_access::detectMessage *>(lpData->lpData);
+
+		TCHAR debugMsg[512];
+		wsprintf(debugMsg, _T("rows = %d, cols = %d, type = %08X, step = %d"), pDetectMessage->imageHeader.rows, pDetectMessage->imageHeader.cols, pDetectMessage->imageHeader.type, pDetectMessage->imageHeader.step);
+		MessageBox(NULL, debugMsg, _T("debug"), MB_OK);
+		cv::Mat image(pDetectMessage->imageHeader.rows, pDetectMessage->imageHeader.cols, pDetectMessage->imageHeader.type, pDetectMessage->imageData, pDetectMessage->imageHeader.step);
+		std::vector<secuwatcher_access::detectedData> resultData;
+		// 検出処理
+		if (!detect(image, resultData))
+			return secuwatcher_access::DETECT_DETECT_ERROR;
+		MessageBox(NULL, _T("detect"), _T("debug"), MB_OK);
+		// メモリマップドファイルオープン
+		HANDLE hMapFile = OpenFileMappingA(FILE_MAP_WRITE, FALSE, pDetectMessage->mapfileDetectedData);
+		if (hMapFile == NULL)
+		{
+			MessageBoxA(m_hWnd, "OpenFileMapping error", "SecuwatcherMask", MB_OK);
+			return secuwatcher_access::DETECT_MAPFILE_ERROR;
+		}
+		MessageBox(NULL, _T("OpenFileMappingA"), _T("debug"), MB_OK);
+		void *lpOutput = MapViewOfFile(hMapFile, FILE_MAP_WRITE, 0, 0, 0);
+		if (lpOutput == NULL)
+		{
+			MessageBoxA(m_hWnd, "MapViewOfFile error", "SecuwatcherMask", MB_OK);
+			CloseHandle(hMapFile);
+			return secuwatcher_access::DETECT_MAPFILE_ERROR;
+		}
+		// 結果をかき出し
+		__int64 *pSizeDetected = static_cast<__int64 *>(lpOutput);
+		secuwatcher_access::detectedData *pDetectedData = reinterpret_cast<secuwatcher_access::detectedData*>(pSizeDetected + 1);
+		if (resultData.size() > m_maxDetectedData)
+		{
+			MessageBoxA(m_hWnd, "Not enough memory", "SecuwatcherMask", MB_OK);
+			*pSizeDetected = m_maxDetectedData;
+			result = secuwatcher_access::DETECT_NOT_ENOUGH_MEMORY;
+		}
+		else
+		{
+			for (auto detectData : resultData)
+				memcpy(pDetectedData++, &detectData, sizeof(secuwatcher_access::stRectData));
+			MessageBox(NULL, _T("memcpy"), _T("debug"), MB_OK);
+			*pSizeDetected = resultData.size();
+			result = secuwatcher_access::DETECT_SUCCESS;
+		}
+		//memcpy(pDetectedData, &resultData[0], sizeof(secuwatcher_access::stRectData)*(*pSizeDetected));
+		// メモリマップドファイルクローズ
+		UnmapViewOfFile(lpOutput);
+		MessageBox(NULL, _T("UnmapViewOfFile"), _T("debug"), MB_OK);
 		CloseHandle(hMapFile);
-		return secuwatcher_access::DETECT_MAPFILE_ERROR;
 	}
-	// 結果をかき出し
-	__int64 *pSizeDetected = static_cast<__int64 *>(lpOutput);
-	secuwatcher_access::detectedData *pDetectedData = reinterpret_cast<secuwatcher_access::detectedData*>(pSizeDetected+1);
-	int result;
-	if (resultData.size() > m_maxDetectedData)
+	catch (std::exception &e)
 	{
-		*pSizeDetected = m_maxDetectedData;
-		result = secuwatcher_access::DETECT_NOT_ENOUGH_MEMORY;
+		MessageBoxA(m_hWnd, e.what(), "MSDK_Detector Exception", MB_OK);
+		return false;
 	}
-	else
+	catch (...)
 	{
-		*pSizeDetected = resultData.size();
-		result = secuwatcher_access::DETECT_SUCCESS;
+		MessageBoxA(m_hWnd, "Unknown error", "MSDK_Detector Exception", MB_OK);
+		return false;
 	}
-	for (auto detectData : resultData)
-		memcpy(pDetectedData++, &detectData, sizeof(secuwatcher_access::stRectData));
-	//memcpy(pDetectedData, &resultData[0], sizeof(secuwatcher_access::stRectData)*(*pSizeDetected));
-	// メモリマップドファイルクローズ
-	UnmapViewOfFile(lpOutput);
-	CloseHandle(hMapFile);
 	return result;
 }
 #endif

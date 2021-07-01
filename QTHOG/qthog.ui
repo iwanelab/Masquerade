@@ -254,7 +254,6 @@
     </property>
     <addaction name="actionDetect_Faces"/>
     <addaction name="actionFace_CV_Tracking"/>
-    <addaction name="actionSet_Color_Threshold"/>
    </widget>
    <widget class="QMenu" name="menuShow">
     <property name="title">
@@ -262,13 +261,6 @@
     </property>
     <addaction name="actionShow_Faces"/>
     <addaction name="actionShowBatch_Dialog"/>
-   </widget>
-   <widget class="QMenu" name="menuTest_2">
-    <property name="title">
-     <string>Test</string>
-    </property>
-    <addaction name="actionSVM_Learning"/>
-    <addaction name="actionClear_Objects"/>
    </widget>
    <widget class="QMenu" name="menuSetting">
     <property name="title">
@@ -294,13 +286,13 @@
      <string>Edit</string>
     </property>
     <addaction name="actionSelect_All"/>
+    <addaction name="actionClear_Objects"/>
    </widget>
    <addaction name="menuFile"/>
    <addaction name="menuEdit"/>
    <addaction name="menuTest"/>
    <addaction name="menuShow"/>
    <addaction name="menuSetting"/>
-   <addaction name="menuTest_2"/>
    <addaction name="menuHelp"/>
   </widget>
   <widget class="QStatusBar" name="statusBar"/>
@@ -320,11 +312,6 @@
     <string>Ctrl+1</string>
    </property>
   </action>
-  <action name="actionDetect_HOG">
-   <property name="text">
-    <string>Detect HOG</string>
-   </property>
-  </action>
   <action name="actionWrite_Objects">
    <property name="text">
     <string>Write Objects...</string>
@@ -341,83 +328,14 @@
     <string>Ctrl+2</string>
    </property>
   </action>
-  <action name="actionDetect_HOG_All">
-   <property name="text">
-    <string>Detect HOG All</string>
-   </property>
-  </action>
-  <action name="actionDetect_Face">
-   <property name="text">
-    <string>Detect Face</string>
-   </property>
-  </action>
-  <action name="actionNext_Objects">
-   <property name="text">
-    <string>Next Objects</string>
-   </property>
-   <property name="shortcut">
-    <string>Ctrl+N</string>
-   </property>
-  </action>
-  <action name="actionSkin_Detect">
-   <property name="text">
-    <string>Skin Detect</string>
-   </property>
-  </action>
-  <action name="actionFace_Tracking">
-   <property name="text">
-    <string>Face Tracking</string>
-   </property>
-  </action>
-  <action name="actionRead_ICV">
-   <property name="text">
-    <string>Read ICV...</string>
-   </property>
-   <property name="shortcut">
-    <string>Ctrl+3</string>
-   </property>
-  </action>
   <action name="actionFace_CV_Tracking">
    <property name="text">
-    <string>Track Faces</string>
-   </property>
-  </action>
-  <action name="actionShow_skin_score">
-   <property name="text">
-    <string>Show skin score</string>
+    <string>Track Object</string>
    </property>
   </action>
   <action name="actionShow_Faces">
    <property name="text">
-    <string>Show Faces</string>
-   </property>
-  </action>
-  <action name="actionRead_Project_File">
-   <property name="text">
-    <string>Read Project File...</string>
-   </property>
-   <property name="shortcut">
-    <string>Ctrl+O</string>
-   </property>
-  </action>
-  <action name="actionExtract_MSER">
-   <property name="text">
-    <string>Extract MSER</string>
-   </property>
-  </action>
-  <action name="actionQuickShift">
-   <property name="text">
-    <string>QuickShift</string>
-   </property>
-  </action>
-  <action name="actionQuickShiftSave">
-   <property name="text">
-    <string>QuickShiftSave</string>
-   </property>
-  </action>
-  <action name="actionQuickEdison">
-   <property name="text">
-    <string>QuickEdison</string>
+    <string>Show Objects</string>
    </property>
   </action>
   <action name="actionExport_Masked_Images">
@@ -425,39 +343,9 @@
     <string>Export Masked Images...</string>
    </property>
   </action>
-  <action name="actionShow_Skin_Color">
-   <property name="text">
-    <string>Show Skin Color</string>
-   </property>
-  </action>
-  <action name="actionSkin_Sampling">
-   <property name="text">
-    <string>Skin Sampling</string>
-   </property>
-  </action>
-  <action name="actionSet_Color_Threshold">
-   <property name="text">
-    <string>Set SVM Threshold...</string>
-   </property>
-  </action>
-  <action name="actionSVM_Learning">
-   <property name="text">
-    <string>SVM Learning...</string>
-   </property>
-  </action>
-  <action name="actionSVM_Test">
-   <property name="text">
-    <string>SVM Test</string>
-   </property>
-  </action>
-  <action name="actionTest_GpuHog">
-   <property name="text">
-    <string>Test GpuHog</string>
-   </property>
-  </action>
   <action name="actionDetect_Faces">
    <property name="text">
-    <string>Detect Faces</string>
+    <string>Detect Object</string>
    </property>
   </action>
   <action name="actionClear_Objects">
@@ -478,34 +366,9 @@
     <string>Ctrl+S</string>
    </property>
   </action>
-  <action name="actionHaar_Detect_Test">
-   <property name="text">
-    <string>Haar Detect Test</string>
-   </property>
-  </action>
-  <action name="actionHead_Shoulder_SVM_Learning">
-   <property name="text">
-    <string>Head Shoulder SVM Learning...</string>
-   </property>
-  </action>
   <action name="actionRead_SVM_Data">
    <property name="text">
     <string>Read SVM Data...</string>
-   </property>
-  </action>
-  <action name="actionDetect_Head_Shoulder">
-   <property name="text">
-    <string>Detect Head Shoulder</string>
-   </property>
-  </action>
-  <action name="actionPCA_with_samples">
-   <property name="text">
-    <string>PCA with samples...</string>
-   </property>
-  </action>
-  <action name="actionShrink_Tracking_Data">
-   <property name="text">
-    <string>Shrink Tracking Data...</string>
    </property>
   </action>
   <action name="actionSet_Blur_Intensity_For_Faces">

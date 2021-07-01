@@ -20,12 +20,10 @@
 #include <fstream>
 #include <QInputDialog>
 #include <opencv.hpp>
-#include "HogUtils.h"
 #include <highgui.h>
 #include <vfw.h>
 #include "IdleWatcher.h"
 #include <QTime>
-#include "detector.h"
 
 #include <QMessageBox>
 #include <QUuid>
@@ -35,6 +33,8 @@
 #include <QElapsedTimer>
 
 #include "FileUtility.h"
+
+#include "ExternalDetector.h"
 
 
 QtHOG::QtHOG(QWidget *parent, Qt::WFlags flags)
@@ -52,8 +52,6 @@ QtHOG::QtHOG(QWidget *parent, Qt::WFlags flags)
 	m_targetObject(-1),
 	m_bMidDrag(false),
 	m_colorThresh(2.0),
-	m_svm(0),
-	m_numberSvm(0),
 	m_bCancel(false),
 	m_lockonTarget(-1),
 	m_pIdleWatcher(new IdleWatcher(this)),
@@ -150,14 +148,16 @@ QtHOG::QtHOG(QWidget *parent, Qt::WFlags flags)
 	qApp->installEventFilter(m_pIdleWatcher);
 	m_pTime->start();
 
-	// secuwatcherMask実行
-	if (m_detectMethod == Constants::DetectMethod::SECUWATCHER)
+	// 外部処理実行
+	if (m_detectMethod == Constants::DetectMethod::EXTERNAL)
 	{
+		m_detector = dynamic_cast<IDetector *>(new CExternalDetector);
+
 		TCHAR drive[_MAX_DRIVE];
 		TCHAR dir[_MAX_DIR];
 		TCHAR filename[_MAX_FNAME];
 		TCHAR ext[_MAX_FNAME];
-		// 起動中のsecuwatcherMaskを停止する。
+		// 起動中の外部処理を停止する。
 		DWORD processIds[1024];
 		DWORD processNum;
 		if (EnumProcesses(processIds, sizeof(processIds), &processNum))
@@ -183,7 +183,7 @@ QtHOG::QtHOG(QWidget *parent, Qt::WFlags flags)
 			}
 		}
 
-		// secuwatcherMaskを実行する。
+		// 外部処理を実行する。
 		TCHAR childProcPath[MAX_PATH];
 		TCHAR exePath[MAX_PATH];
 		::GetModuleFileName(NULL, exePath, MAX_PATH);
@@ -191,11 +191,11 @@ QtHOG::QtHOG(QWidget *parent, Qt::WFlags flags)
 		_tmakepath_s(childProcPath, drive, dir, m_childProcName, NULL);
 		if (!PathFileExists(childProcPath))
 		{
-			MessageBox(NULL, _T("not exist secuwatcherMask process file"), _T("Masquerade"), MB_OK);
+			MessageBox(NULL, _T("not exist detector execute process file"), _T("Masquerade"), MB_OK);
 			return;
 		}
-		m_secuwatcherMask.setWindowHandle(this->winId());
-		if (!m_secuwatcherMask.initChildProcess(childProcPath))
+		m_detector->setWindowHandle(this->winId());
+		if (!m_detector->initChildProcess(childProcPath))
 		{
 			MessageBox(NULL, _T("execute process error"), _T("Masquerade"), MB_OK);
 			return;
@@ -205,6 +205,8 @@ QtHOG::QtHOG(QWidget *parent, Qt::WFlags flags)
 
 QtHOG::~QtHOG()
 {
+	if (m_detectMethod == Constants::DetectMethod::EXTERNAL && m_detector != NULL)
+		m_detector->closeChildProcess();
 	delete m_pAviManager;
 	delete m_pCalculator;
 	//delete m_pDlgSkinColor;
@@ -213,8 +215,6 @@ QtHOG::~QtHOG()
 
 	m_pStructData->release();
 
-	if (m_svm)
-		delete m_svm;
 	if (m_pPCA)
 		delete m_pPCA;
 
@@ -371,33 +371,18 @@ void QtHOG::on_sliderFrame_valueChanged(int frame)
 }
 
 // 縮小版テスト
-void QtHOG::on_actionDetect_HOG_triggered()
-{
-	int frame = ui.sliderFrame->value();
-
-	//detectHOG(frame);
-
-	setFrame(frame, true);
-	m_curRegion = StructData::iterator<SRegion>();
-}
-
 void QtHOG::on_actionDetect_Faces_triggered()
 {	
 	//人検出、顔検出でGPUを利用する
 //	bool useGPU = false;
 	switch (m_detectMethod)
 	{
-	case Constants::DetectMethod::HOG:
-		if (!m_svm)
+	case Constants::DetectMethod::EXTERNAL:
+		TCHAR	filepath[MAX_PATH];
+		getInitialFileName(filepath);
+		if (!m_detector->setParameters(filepath))
 		{
-			if (!readSVMData())
-				return;
-		}
-		break;
-	case Constants::DetectMethod::SECUWATCHER:
-		if (!m_secuwatcherMask.setParameters(m_detectParam))
-		{
-			MessageBox(NULL, _T("secuwatcherMask initialize error"), _T("Masquerade"), MB_OK);
+			MessageBox(NULL, _T("detector process initialize error"), _T("Masquerade"), MB_OK);
 			return;
 		}
 		break;
@@ -433,14 +418,10 @@ void QtHOG::on_actionDetect_Faces_triggered()
 		case Constants::ImageType::PANORAMIC:
 			//計測対象１
 			detect_Panoramic(frame);
-			//計測対象２
-			detectFaceInFrame(frame);
 			break;
 		case Constants::ImageType::PERSPECTIVE:
 			//計測対象１
 			detect_Perspective(frame);
-			//計測対象２
-			detectFaceInFrame(frame);
 			break;
 		default:
 			return;
@@ -454,111 +435,6 @@ void QtHOG::on_actionDetect_Faces_triggered()
 	//m_executeStatus.clear();
 }
 
-// 未使用なので削除
-//void QtHOG::detecterCascade(int frame)
-//{
-//	int width = m_pAviManager->getWidth();
-//	int height = m_pAviManager->getHeight();
-//
-//	cv::Mat frameImage;
-//
-//	m_pStructData->mutex.lock();
-//	cv::Mat frameMat = m_pAviManager->getImage(frame);
-//	cv::cvtColor(frameMat, frameImage, CV_BGR2GRAY);
-//	m_pStructData->mutex.unlock();
-//
-//	double scale = 2.0;
-//	cv::Mat smallImg(cv::saturate_cast<int>(frameMat.rows/scale), cv::saturate_cast<int>(frameMat.cols/scale), CV_8UC1);
-//	cv::resize(frameImage, smallImg, smallImg.size(), 0, 0, cv::INTER_LINEAR);
-//	cv::equalizeHist(smallImg, smallImg);
-//
-//	std::vector<cv::Rect> faces;
-//	cascade.detectMultiScale(
-//		smallImg,
-//		faces,
-//		1.05f,
-//		3,
-//		CV_HAAR_SCALE_IMAGE,//CV_HAAR_DO_CANNY_PRUNING,//
-//		cv::Size(8/scale, 8/scale)
-//		);
-//
-//	for(std::vector<cv::Rect>::const_iterator itr = faces.begin();
-//		itr != faces.end();
-//		itr++)
-//	{
-//		CvRect r;
-//		r.x = itr->x * scale;
-//		r.y = itr->y * scale;
-//		r.width = itr->width * scale;
-//		r.height = itr->height * scale;
-//
-//		m_pStructData->insertRegion(m_curCamera, frame, -1, r, SRegion::TypeFace);
-//	}
-//	setFrame(frame, true);
-//	m_curRegion = StructData::iterator<SRegion>();
-//}
-//
-//void QtHOG::detecterSvm(int frame)
-//{
-//	cv::Mat m;
-//	IplImage *src, *src_color, *src_tmp;
-//
-//	m_pStructData->mutex.lock();
-//	src_color = m_pAviManager->getImage(frame);
-//	src = cvCreateImage( cvGetSize(src_color), IPL_DEPTH_8U, CV_BGRA2BGR );
-//	cvCvtColor(src_color,src,CV_BGR2GRAY);
-//	m_pStructData->mutex.unlock();
-//
-//	//src が gray
-//	CvMat mat;
-//	cvInitMatHeader(&mat, 1, WidthClip*HeightClip, CV_32FC1, NULL);
-//	int tw = src->width;
-//	int th = src->height;
-//	float a[WidthClip*HeightClip];
-//
-//	//サンプルどおり
-//	float ret = -1.0;
-//	int stepx = 3;
-//	int stepy = 3;
-//	int width = WidthClip;
-//	int height= HeightClip;
-//	int iterateLimit = 9;
-//	float steps = 1.1;
-//	for(int iterate = 0; iterate < iterateLimit; iterate++)
-//	{
-//		src_tmp = cvCreateImage(
-//			cvSize( (int)(tw / steps), (int)(th / steps) ), IPL_DEPTH_8U, 1);
-//		cvResize (src, src_tmp);
-//
-//		tw = src_tmp->width;
-//		th = src_tmp->height;
-//		for (int sy = 0; sy <= src_tmp->height - height; sy += stepy)
-//		{
-//			for (int sx = 0; sx <= src_tmp->width - width; sx += stepx)
-//			{
-//				for (int i = 0; i < height; i++)
-//				{
-//					for (int j = 0; j < width; j++)
-//					{
-//						a[i * width + j] =
-//							float ((int) ((unsigned char) (src_tmp->imageData[(i + sy) * src_tmp->widthStep + (j + sx)])) / 255.0);
-//					}
-//				}
-//
-//				//
-//				cvSetData(&mat, a, sizeof (float) * WidthClip*HeightClip);
-//				ret = m_svm->predict(&mat);
-//				if( (int)ret == 1 )
-//				{
-//					qDebug() << "score :" << ret;
-//				}
-//			}
-//		}
-//
-//		steps += 0.1;//0.1は変数にしないとだめ
-//	}
-//}
-//
 void QtHOG::detect_Panoramic(int frame)
 {
 	int width = m_pAviManager->getWidth();
@@ -578,31 +454,10 @@ void QtHOG::detect_Panoramic(int frame)
 	std::vector<cv::Rect> found;
 	switch (m_detectMethod)
 	{
-	case Constants::DetectMethod::HOG:
-		detectHOG(resizeImage, found);
-		break;
-	case Constants::DetectMethod::SECUWATCHER:
-		detectSecuwatcher(resizeImage, found, types);
+	case Constants::DetectMethod::EXTERNAL:
+		detect(resizeImage, found, types);
 		break;
 	}
-	//if (m_useGPU)
-	//{
-	//	OutputDebugString(_T("detectHOG with useGPU\n"));
-	//	cv::gpu::GpuMat gpu_img(resizeImage.size().height, resizeImage.size().width, CV_8UC1);
-	//	cv::gpu::HOGDescriptor hog;
-	//	hog.setSVMDetector( cv::gpu::HOGDescriptor::getPeopleDetector64x128());
-
-	//	gpu_img.upload(resizeImage);
-	//	hog.detectMultiScale(gpu_img, found);
-	//	gpu_img.release();
-	//}
-	//else
-	//{
-	//	cv::HOGDescriptor hog;
-	//	hog.setSVMDetector( cv::HOGDescriptor::getDefaultPeopleDetector() );
-
-	//	hog.detectMultiScale(resizeImage, found);
-	//}
 
 	StructData::iterator<SRegion> itr;
 	for (int i = 0; i < found.size(); ++i)
@@ -620,37 +475,11 @@ void QtHOG::detect_Panoramic(int frame)
 
 		switch (m_detectMethod)
 		{
-		case Constants::DetectMethod::HOG:
-			itr = m_pStructData->insertRegion(m_curCamera, frame, -1, r, SRegion::TypeHog);
-			break;
-		case Constants::DetectMethod::SECUWATCHER:
+		case Constants::DetectMethod::EXTERNAL:
 			itr = m_pStructData->insertRegion(m_curCamera, frame, -1, r, types[i]);
 			break;
 		}
 	}
-	//kosshyadd
-	/*int doDivideImageStep = 80;	// 外から調整できるように
-	if( !(frame%doDivideImageStep) )
-	{
-		int wclip = 64;
-		int hclip = 128;
-		int wstep = 32;
-		int hstep = 32;
-		for(int hs = 0; hs <= height - hclip; hs+=hstep)
-		{
-			for(int ws = 0; ws <= width - wclip; ws+=wstep)
-			{
-				CvRect rect;
-				rect.x = ws;
-				rect.y = hs;
-				rect.width = wclip;
-				rect.height = hclip;
-
-				itr = m_pStructData->insertRegion(0, frame, -1, rect, SRegion::TypeHog);
-			}
-		}
-	}*/
-	//kosshyaddend
 	setFrame(frame, true);
 	m_curRegion = StructData::iterator<SRegion>();
 }
@@ -686,35 +515,10 @@ void QtHOG::detect_Perspective(int frame)
 		std::vector<cv::Rect> found;
 		switch (m_detectMethod)
 		{
-		case Constants::DetectMethod::HOG:
-			detectHOG(frameMat, found);
-			break;
-		case Constants::DetectMethod::SECUWATCHER:
-			detectSecuwatcher(frameMat, found, types);
+		case Constants::DetectMethod::EXTERNAL:
+			detect(frameMat, found, types);
 			break;
 		}
-		//if (m_useGPU)
-		//{
-		//	OutputDebugString(_T("detectHOG_Perspective with useGPU\n"));
-		//	cv::gpu::GpuMat gpu_img(resizeImage.size().height, resizeImage.size().width, CV_8UC1);
-		//	cv::gpu::HOGDescriptor hog;
-		//	hog.setSVMDetector( cv::gpu::HOGDescriptor::getPeopleDetector64x128());
-
-		//	gpu_img.upload(resizeImage);
-		//	hog.detectMultiScale(gpu_img, found);
-		//	gpu_img.release();
-		//}
-		//else
-		//{
-		//	cv::HOGDescriptor hog;
-		//	hog.setSVMDetector( cv::HOGDescriptor::getDefaultPeopleDetector() );
-
-		//	hog.detectMultiScale(resizeImage, found);
-		//}
-
-//#ifdef DEBUG
-//		cv::Mat panoimage = m_pAviManager->getImage(frame, 0, MOVIELOADER_SPHERE);
-//#endif
 
 		StructData::iterator<SRegion> itr;
 		for (int i = 0; i < found.size(); ++i)
@@ -731,7 +535,7 @@ void QtHOG::detect_Perspective(int frame)
 			case Constants::DetectMethod::HOG:
 				itr = m_pStructData->insertRegion(m_curCamera, frame, -1, r, SRegion::TypeHog);
 				break;
-			case Constants::DetectMethod::SECUWATCHER:
+			case Constants::DetectMethod::EXTERNAL:
 				itr = m_pStructData->insertRegion(m_curCamera, frame, -1, r, types[i]);
 				break;
 			}
@@ -754,65 +558,35 @@ void QtHOG::detect_Perspective(int frame)
 	setFrame(frame, true);
 	m_curRegion = StructData::iterator<SRegion>();
 }
-void QtHOG::detectHOG(cv::Mat image, std::vector<cv::Rect> &found)
+void QtHOG::detect(cv::Mat image, std::vector<cv::Rect> &found, std::vector<SRegion::Type> &types)
 {
-	cv::Mat frameImage;
-	cv::cvtColor(image, frameImage, CV_BGR2GRAY);
-	//if (m_useGPU)
-	//{
-	//	OutputDebugString(_T("detectHOG with useGPU\n"));
-	//	cv::gpu::GpuMat gpu_img(frameImage.size().height, frameImage.size().width, CV_8UC1);
-	//	cv::gpu::HOGDescriptor hog;
-	//	hog.setSVMDetector( cv::gpu::HOGDescriptor::getPeopleDetector64x128());
-
-	//	gpu_img.upload(frameImage);
-	//	hog.detectMultiScale(gpu_img, found);
-	//	gpu_img.release();
-	//}
-	//else
+	std::vector<detector::detectedData> detectDatas;
+	if (!m_detector->detect(image, detectDatas))
 	{
-		cv::HOGDescriptor hog;
-		hog.setSVMDetector( cv::HOGDescriptor::getDefaultPeopleDetector() );
-
-		hog.detectMultiScale(frameImage, found);
+		MessageBox(NULL, _T("detect error"), _T("Masquerade"), MB_OK);
 	}
-	//float scaleX = (float)m_ResizeWidth / (float)image.size().width;
-	//float scaleY = (float)m_ResizeHeight / (float)image.size().height;
-	//for (std::vector<cv::Rect>::iterator itRect = found.begin(); itRect != found.end(); itRect++)
-	//{
-	//	itRect->x = itRect->x / scaleX;
-	//	itRect->y = itRect->y / scaleY;
-	//	itRect->width = itRect->width / scaleX;
-	//	itRect->height = itRect->height / scaleY;
-	//}
-}
-
-void QtHOG::detectSecuwatcher(cv::Mat image, std::vector<cv::Rect> &found, std::vector<SRegion::Type> &types)
-{
-	std::vector<secuwatcher_access::detectedData> detectDatas;
-	m_secuwatcherMask.detect(image, detectDatas);
-	for (std::vector<secuwatcher_access::detectedData>::iterator detectData = detectDatas.begin(); detectData != detectDatas.end(); detectData++)
+	for (std::vector<detector::detectedData>::iterator detectData = detectDatas.begin(); detectData != detectDatas.end(); detectData++)
 	{
 		cv::Rect rectData = cvRect(detectData->rectData.x, detectData->rectData.y, detectData->rectData.width, detectData->rectData.height);
 
-		if (m_detectParam.model[detectData->modelType].valid)
-		{
+		//if (m_detectParam.model[detectData->modelType].valid)
+		//{
 			switch (detectData->modelType)
 			{
-			case secuwatcher_access::MODEL_PERSON:
+			case detector::MODEL_PERSON:
 				types.push_back(SRegion::TypeFace);
 				found.push_back(rectData);
 				break;
-			case secuwatcher_access::MODEL_FACE:
+			case detector::MODEL_FACE:
 				types.push_back(SRegion::TypeFace);
 				found.push_back(rectData);
 				break;
-			case secuwatcher_access::MODEL_PLATE:
+			case detector::MODEL_PLATE:
 				types.push_back(SRegion::TypePlate);
 				found.push_back(rectData);
 				break;
 			}
-		}
+		//}
 	}
 }
 
@@ -897,26 +671,6 @@ void QtHOG::on_actionRead_Objects_triggered()
 		m_pDlgFaceGrid->updateView();
 }
 
-//void QtHOG::on_comboBoxMode_currentIndexChanged(int idx)
-//{
-//	/*
-//	m_mode = (Constants::Mode)idx;
-//
-//	if (m_mode == Constants::ModeSkinLearning)
-//	{
-//		m_pDlgSkinColor->show();
-//	}
-//	else
-//		m_pDlgSkinColor->hide();
-//		*/
-//}
-//
-void QtHOG::on_actionShow_Skin_Color_triggered()
-{
-	//m_pDlgSkinColor->show();
-}
-
-
 void QtHOG::on_pushButtonManualDetect_clicked(bool bChecked)
 {
 	if (bChecked)
@@ -938,15 +692,6 @@ void QtHOG::on_pushButtonManualDetect_clicked(bool bChecked)
 			m_pDlgFaceGrid->unsetWaitRegion();
 	}
 }
-
-//void QtHOG::on_comboBoxType_currentIndexChanged(int idx)
-//{
-//	m_detectType = (Constants::DetectType)idx;
-//	//m_pDlgFaceGrid->setDetectType(m_detectType);
-//
-//	ui.imageView->setDetectMode(m_detectType);
-//	setFrame(ui.sliderFrame->value(), true);
-//}
 
 void QtHOG::onImageViewClicked(QGraphicsSceneMouseEvent *mouseEvent)
 {
@@ -1131,34 +876,6 @@ void QtHOG::onImageViewReleased(QGraphicsSceneMouseEvent *mouseEvent)
 		return;
 	}
 
-	if (false)//m_svm)
-	{
-		// SVMのテスト
-		int frame = ui.sliderFrame->value();
-		cv::Mat grayImage;
-		cv::Mat frameImage = m_pAviManager->getImage(frame);
-		cv::cvtColor(frameImage, grayImage, CV_BGR2GRAY);
-
-		cv::Rect r;
-		r.x = m_selectedRegion[0].x;
-		r.y = m_selectedRegion[0].y;
-		r.width = w;
-		r.height = h;
-
-		std::vector<float> feat;
-		Detector::getHoG(grayImage(r), feat);
-
-		CvMat m;
-		cvInitMatHeader (&m, 1, feat.size(), CV_32FC1, &(feat[0]));
-
-		if (m_svm->predict(&m))
-			qDebug() << "Found!";
-		else
-			qDebug() << "not found";
-
-		return;
-	}
-
 	Constants::Mode mode;
 	if (GetKeyState(VK_CONTROL) < 0)
 		mode = Constants::ModeNone;
@@ -1335,78 +1052,6 @@ void QtHOG::manualDetect()
 	updateSelectNum();
 }
 
-StructData::iterator<SRegion> QtHOG::searchNextObject(int frame)
-{
-	if (m_pAviManager->getFrameCount() < 1)
-		return StructData::iterator<SRegion>();
-
-	int curFrame = frame;
-	while (true)
-	{
-		StructData::iterator<SRegion> it;
-
-		for (it = m_pStructData->regionBegin(m_curCamera, curFrame); it != m_pStructData->regionEnd(); ++it)
-		{
-			if (it->type == SRegion::TypeHog)
-				return it;
-		}
-
-		++curFrame;
-		if (curFrame > m_pAviManager->getFrameCount() - 1)
-			curFrame = 0;
-
-		if (curFrame == frame)
-			return StructData::iterator<SRegion>();
-	}
-}
-
-void QtHOG::on_actionNext_Objects_triggered()
-{
-	if (m_curRegion == m_pStructData->regionEnd())
-	{
-		int frame = ui.sliderFrame->value();
-
-		m_curRegion = searchNextObject(frame);
-		if (m_curRegion == m_pStructData->regionEnd())
-			return;
-
-		setFrame(m_curRegion->frame);
-		//ui.sliderFrame->setValue(m_curRegion->frame);
-	}
-	else
-	{
-		++m_curRegion;
-		for (;m_curRegion != m_pStructData->regionEnd(); ++m_curRegion)
-		{
-			if (m_curRegion->type == SRegion::TypeHog)
-				break;
-		}
-
-		if (m_curRegion == m_pStructData->regionEnd())
-		{
-			int frame = ui.sliderFrame->value();
-
-			m_curRegion = searchNextObject(frame + 1);
-			if (m_curRegion == m_pStructData->regionEnd())
-				return;
-			setFrame(m_curRegion->frame);
-		}
-	}
-
-	ui.sliderScale->setEnabled(true);
-	ui.checkBoxAutoScale->setCheckState(Qt::Unchecked);
-
-	qDebug() << m_curRegion->camera << m_curRegion->frame << m_curRegion->object;
-	qDebug() << m_curRegion->rect.x;
-
-	CvRect &r = m_curRegion->rect;
-	float scale = ui.imageView->adjustScale(r.width, r.height);
-	ui.labelScale->setText(QString::number((int)(scale * 100)));
-	ui.sliderScale->setValue((int)(scale * 100));
-
-	ui.imageView->centerOn(r.x + r.width / 2, r.y + r.height / 2);
-}
-
 void QtHOG::on_menuTest_aboutToShow()
 {
 	//ui.actionDetect_Face->setEnabled(m_curRegion != m_pStructData->regionEnd() && m_pSkinClassifier->isSingleGaussAvailable());
@@ -1447,10 +1092,6 @@ static float calcMdist(const PTM::TVector<2, double> &v1, const PTM::TVector<2, 
 }
 
 //未使用
-void QtHOG::on_actionSkin_Detect_triggered()
-{
-}
-
 bool rectsOverlap(const CvRect &r1, const CvRect &r2, float threshRatio = 0.8)
 {
 	CvRect r3;
@@ -1470,123 +1111,6 @@ bool rectsOverlap(const CvRect &r1, const CvRect &r2, float threshRatio = 0.8)
 	float r3_area = r3.width * r3.height;
 
 	return ((r1_area / r3_area) > threshRatio || (r2_area / r3_area) > threshRatio);
-}
-
-//未使用
-void QtHOG::on_actionDetect_Face_triggered()
-{
-}
-
-void QtHOG::detectFaceInFrame(int frame)
-{
-#ifdef DEBUG
-	OutputDebugString(_T("detectFaceInFrame\n"));
-#endif
-
-	m_pStructData->mutex.lock();
-	cv::Mat image = m_pAviManager->getImage(frame);
-	m_pStructData->mutex.unlock();
-
-	StructData::iterator<SRegion> itr;
-	std::vector<CvRect> faceRects;
-
-	for (itr = m_pStructData->regionBegin(m_curCamera, frame); itr != m_pStructData->regionEnd(); ++itr)
-	{
-		if (itr->type != SRegion::TypeHog)
-			continue;
-
-		CvRect rect = itr->rect;
-		cv::Point facePos;
-		
-		bool detectFace = false;
-
-		//if(m_useGPU == true)
-		//{
-		//	detectFace = detectFaceInRegion7(m_svm, image, rect, facePos);
-		//}
-		//else
-		{
-			detectFace = detectFaceInRegion7NoGPU(m_svm, image, rect, facePos);
-		}
-
-		if (detectFace == true)
-		{
-			m_pStructData->setRegionFlags(itr, SRegion::FlagHasFace);
-
-			int faceSize = rect.width / 8;	// test
-			CvRect faceRect;
-			faceRect.x = rect.x + facePos.x - faceSize;
-			faceRect.y = rect.y + facePos.y - faceSize;
-			faceRect.width = 2 * faceSize;
-			faceRect.height = 2 * faceSize;
-
-			faceRects.push_back(faceRect);
-		}
-
-	}
-
-	std::vector<std::set<int> > regionSets;
-	std::vector<std::set<int> >::iterator itSets;
-	std::set<int>::iterator its;
-
-	for (unsigned int j = 0; j < faceRects.size(); ++j)
-	{
-		std::set<int> tmpSet;
-		tmpSet.insert(j);
-		for (unsigned int k = j + 1; k < faceRects.size(); ++k)
-		{
-			if (rectsOverlap(faceRects[j], faceRects[k]))
-				tmpSet.insert(k);
-		}
-		// 既存のグループとの統合
-		bool bUnion = false;
-		for (itSets = regionSets.begin(); itSets != regionSets.end(); ++itSets)
-		{
-			for (its = tmpSet.begin(); its != tmpSet.end(); ++its)
-			{
-				if (itSets->find(*its) != itSets->end())
-				{
-					bUnion = true;
-					break;
-				}
-			}
-			if (bUnion)
-			{
-				for (its = tmpSet.begin(); its != tmpSet.end(); ++its)
-					itSets->insert(*its);
-				break;
-			}
-		}
-		if (!bUnion)
-			regionSets.push_back(tmpSet);
-	}
-	
-	for (itSets = regionSets.begin(); itSets != regionSets.end(); ++itSets)
-	{
-		CvRect maxRect;
-		int maxArea = -1;
-		for (its = itSets->begin(); its != itSets->end(); ++its)
-		{
-			CvRect &r = faceRects[*its];
-			if (r.width * r.height > maxArea)
-			{
-				maxArea = r.width * r.height;
-				maxRect = r;
-			}
-		}
-
-		itr = m_pStructData->insertRegion(m_curCamera, frame, -1, maxRect, SRegion::TypeFace);
-
-		itr->cov.clear();// = cov;
-		itr->u.clear();// = u;
-	}
-	updateSelectNum();
-}
-
-//未使用
-void QtHOG::on_actionSkin_Sampling_triggered()
-{
-
 }
 
 struct STrail
@@ -1624,438 +1148,6 @@ bool QtHOG::readSingleGauss()
 	*/
 
 	return true;
-}
-
-void QtHOG::on_actionRead_SVM_Data_triggered()
-{
-	if (m_svm)
-		delete m_svm;
-
-	readSVMData();
-}
-
-bool QtHOG::readSVMData()
-{
-	QString selFilter = "";
-	QString fileName = QFileDialog::getOpenFileName(this,
-													tr("Read SVM data"), QDir::currentPath(),
-													tr("SVM data(*.xml);;All files (*.*)"), &selFilter);
-
-	if (fileName.isEmpty())
-		return false;
-
-	if (!m_svm)
-	{
-		m_svm = new CvSVM;
-		setCursor(Qt::WaitCursor);
-		m_svm->load (fileName.toLocal8Bit());
-/*
-		m_decisionPlane.resize(Constants::HogDim + 1, 0);
-		// SVMからパラメータを取得する
-		std::vector<float> vecParams(Constants::HogDim, 0);
-	
-		CvMat m;
-		cvInitMatHeader (&m, 1, Constants::HogDim, CV_32FC1, NULL);
-
-		cvSetData (&m, &vecParams[0], sizeof(float) * Constants::HogDim);
-		m_decisionPlane[Constants::HogDim] = m_svm->predict(&m, true);
-		//double rho = m_svm->predict(&m, true);
-
-		for (int i = 0; i < Constants::HogDim; ++i)
-		{
-			vecParams[i] = 1.0f;
-			cvSetData (&m, &vecParams[0], sizeof(float) * Constants::HogDim);
-			m_decisionPlane[i] = m_svm->predict(&m, true) - m_decisionPlane[Constants::HogDim];
-			vecParams[i] = 0.0f;
-		}
-*/		
-		unsetCursor();
-	}
-
-	return true;
-}
-
-void QtHOG::on_actionFace_Tracking_triggered()
-{
-	/*
-	if (!m_pSkinClassifier->isSingleGaussAvailable())
-	{
-		if (!readSingleGauss())
-			return;
-		if (!m_pSkinClassifier->isSingleGaussAvailable())
-			return;
-	}
-	*/
-	PTM::TVector<2, double> u;
-	PTM::TMatrixRow<2, 2, double> cov;
-
-	std::map<int, STrail> trails;
-
-	int startFrame = 0;
-	int endFrame = m_pAviManager->getFrameCount() - 1;
-	const int SearchRange = 70;	// temp
-	const double CorrThresh = 0.6;	// temp
-	//const double ColorThresh = -2.0;	// temp
-	const int NumImageCache = 20;
-	const int InitialLife = 3;
-
-	// 先頭フレームの処理
-	m_pStructData->mutex.lock();
-	cv::Mat frameImage = m_pAviManager->getImage(startFrame);
-	m_pStructData->mutex.unlock();
-	std::map<int, cv::Mat> grayImages;
-	cv::cvtColor(frameImage, grayImages[0], CV_BGR2GRAY);
-
-	StructData::iterator<SRegion> itr;
-	for (itr = m_pStructData->regionBegin(m_curCamera, startFrame); itr != m_pStructData->regionEnd(); ++itr)
-	{
-		if (std::find(m_TargetType.begin(), m_TargetType.end(), itr->type) == m_TargetType.end())
-			continue;
-
-		// 新規に追跡を開始
-		trails[itr->object].lastFrame = startFrame;
-		trails[itr->object].rect = itr->rect;
-		trails[itr->object].life = InitialLife;
-		trails[itr->object].type = itr->type;
-	}
-
-	for (unsigned int frame = startFrame + 1; frame <= endFrame; ++frame)
-	{
-		qDebug() << "frame" << frame;
-
-		m_pStructData->mutex.lock();
-		cv::Mat frameImage = m_pAviManager->getImage(frame);
-		m_pStructData->mutex.unlock();
-		//cv::Mat grayImage;
-		cv::cvtColor(frameImage, grayImages[frame], CV_BGR2GRAY);
-
-		std::map<int, STrail>::iterator itTrail;
-		std::set<int> eraseSet;
-		for (itTrail = trails.begin(); itTrail != trails.end(); ++itTrail)
-		{
-			CvRect &sourceRect = itTrail->second.rect;
-			int cx = sourceRect.x + sourceRect.width / 2;
-			int cy = sourceRect.y + sourceRect.height / 2;
-
-			if (cx < 50 || cx > frameImage.cols - 50 || cy < 50 || cy > frameImage.rows - 50)
-			{
-				eraseSet.insert(itTrail->first);
-				continue;
-			}
-
-			int minX = cx - SearchRange;
-			int minY = cy - SearchRange;
-			int maxX = cx + SearchRange;
-			int maxY = cy + SearchRange;
-
-			if (minX < 0)
-				minX = 0;
-			if (minY < 0)
-				minY = 0;
-			if (maxX >= frameImage.cols)
-				maxX = frameImage.cols - 1;
-			if (maxY >= frameImage.rows)
-				maxY = frameImage.rows - 1;
-
-			cv::Rect searchRoi(minX, minY, maxX - minX, maxY - minY);
-			cv::Mat searchWindow = grayImages[frame](searchRoi);
-			
-			cv::Rect patchRoi(sourceRect);
-			cv::Mat patch = grayImages[itTrail->second.lastFrame](patchRoi);
-
-			cv::Mat searchResult;
-			cv::matchTemplate(searchWindow, patch, searchResult, CV_TM_CCOEFF_NORMED);
-
-			//double maxVal;
-			//cv::Point maxLoc;
-			//cv::minMaxLoc(searchResult, 0, &maxVal, 0, &maxLoc);
-
-			std::vector<cv::Point> candidates;
-			//std::vector<double> scores;
-			std::vector<std::pair<int, int> > scoreSortList;
-
-			const int NonMaxSize = 20;
-			//int w = itTrail->second.patch.cols;
-			//int h = itTrail->second.patch.rows;
-
-			//StructData::iterator<SRegion> itPrev;
-			//itPrev = m_pStructData->regionFitAt(itTrail->second.lastRegion);
-
-			for (int y = 0; y < (searchResult.rows / NonMaxSize); ++y)
-			{
-				for (int x = 0; x < (searchResult.cols / NonMaxSize); ++x)
-				{
-					cv::Mat window(searchResult, cv::Rect(x * NonMaxSize, y * NonMaxSize, NonMaxSize, NonMaxSize));
-					double maxCorr;
-					cv::Point maxPos;
-					cv::minMaxLoc(window, 0, &maxCorr, 0, &maxPos);
-
-					if (maxCorr < CorrThresh)
-						continue;
-
-					int xx = searchRoi.x + maxPos.x + x * NonMaxSize;
-					int yy = searchRoi.y + maxPos.y + y * NonMaxSize;
-
-					if (xx < 50 || xx > frameImage.cols - 50 || yy < 50 || yy > frameImage.rows - 50)
-						continue;
-
-					// Married-Match テスト
-					int minX = xx - SearchRange;
-					int minY = yy - SearchRange;
-					int maxX = xx + SearchRange;
-					int maxY = yy + SearchRange;
-
-					if (minX < 0)
-						minX = 0;
-					if (minY < 0)
-						minY = 0;
-					if (maxX >= frameImage.cols)
-						maxX = frameImage.cols - 1;
-					if (maxY >= frameImage.rows)
-						maxY = frameImage.rows - 1;
-
-					//qDebug() << minX << minY << maxX << maxY;
-
-					cv::Rect reverse_searchRoi(minX, minY, maxX - minX, maxY - minY);
-					cv::Mat reverse_searchWindow = grayImages[itTrail->second.lastFrame](reverse_searchRoi);
-
-					//qDebug() << "----- 1 -----";
-
-					//if (frame == 236)
-					//	qDebug() << xx << yy << sourceRect.x << sourceRect.y << sourceRect.width << sourceRect.height;
-
-					cv::Rect sourceRoi(xx, yy, sourceRect.width, sourceRect.height);
-
-					//if (frame == 236)
-					//qDebug() << "----- 2 -----";
-
-					cv::Mat sourceMat = grayImages[frame](sourceRoi);
-
-					//if (frame == 236)
-					//qDebug() << "----- 3 -----";
-
-					cv::matchTemplate(reverse_searchWindow, sourceMat, searchResult, CV_TM_CCOEFF_NORMED);
-
-					//double maxVal;
-					//cv::Point maxLoc;
-					cv::minMaxLoc(searchResult, 0, 0, 0, &maxPos);
-
-					double dx = sourceRect.x - (reverse_searchRoi.x + maxPos.x);
-					double dy = sourceRect.y - (reverse_searchRoi.y + maxPos.y);
-
-					if (dx * dx + dy * dy > 400)	// temp
-						continue;
-
-					// 肌色で絞り込む
-					const int ColorMargin = 10;
-
-					minX = xx - ColorMargin;
-					minY = yy - ColorMargin;
-					maxX = xx + sourceRect.width + ColorMargin;
-					maxY = yy + sourceRect.height + ColorMargin;
-
-					if (minX < 0)
-						minX = 0;
-					if (minY < 0)
-						minY = 0;
-					if (maxX >= frameImage.cols)
-						maxX = frameImage.cols - 1;
-					if (maxY >= frameImage.rows)
-						maxY = frameImage.rows - 1;
-
-					CvRect colorRect;
-					colorRect.x = minX;
-					colorRect.y = minY;
-					colorRect.width = maxX - minX;
-					colorRect.height = maxY - minY;
-					
-					cv::Mat distMat(colorRect.height, colorRect.width, CV_32FC1);
-					uchar *pixel;
-					for (int y = 0; y < colorRect.height; ++y)
-					{
-						uchar *pixelBase = (uchar*)(frameImage.data) + (colorRect.y + y) * frameImage.step;
-
-						for (int x = 0; x < colorRect.width; ++x)
-						{
-							//pixel = (uchar*)(image->imageData) + (y + rect.y) * region->widthStep + 3 * x;
-							pixel = pixelBase + 3 * (colorRect.x + x);
-
-							float b = *(pixel++);
-							float g = *(pixel++);
-							float r = *pixel;
-
-							PTM::TVector<2, double> ts;
-							//double /*t, s,*/ l;
-							//m_pSkinClassifier->convRGB2TSL(r, g, b, ts[0], ts[1], l);
-					
-							//ts[0] = log(t * 100);	ts[1] = log(s * 100);
-		
-							distMat.at<float>(y, x) = -calcMdist(u, ts, cov);
-						}
-					}
-					cvSmooth(&CvMat(distMat), &CvMat(distMat), 2, 11);
-					
-					double maxColorDist;
-					cv::minMaxLoc(distMat, 0, &maxColorDist, 0, &maxPos);
-
-					if (maxColorDist < -m_colorThresh)
-						continue;
-
-					double corrScore = (maxCorr - CorrThresh) / (1 - CorrThresh);
-					double colorScore = (maxColorDist + m_colorThresh) / (0 + m_colorThresh);
-
-					candidates.push_back(cv::Point(colorRect.x + maxPos.x - sourceRect.width / 2, colorRect.y + maxPos.y - sourceRect.height / 2));
-					//scores.push_back(corrScore + corrScore);
-
-					scoreSortList.push_back(std::make_pair( static_cast<int>((corrScore + corrScore)) * 10000, static_cast<int>(candidates.size() - 1)));
-				}
-			}
-			std::sort(scoreSortList.rbegin(), scoreSortList.rend());
-			qDebug() << "candidates.size" << candidates.size();
-
-
-			//if (maxVal > CorrThresh)	// 本当は複数の候補から色と組み合わせて選ぶ
-			if (!candidates.empty())
-			{
-				// トラッキング成功
-				StructData::iterator<SRegion> itr;//, itPrev;
-
-				// イメージの更新
-				CvRect rect;
-				rect.x = candidates[0].x;
-				rect.y = candidates[0].y;
-				rect.width = sourceRect.width;
-				rect.height = sourceRect.height;
-
-				// 既存のTrailと重複をチェック
-				std::map<int, STrail>::iterator foundTrail = trails.end();
-				std::map<int, STrail>::iterator itCheck;
-				for (itCheck = trails.begin(); itCheck != trails.end(); ++itCheck)
-				{
-					if (itCheck->second.lastFrame != frame)
-						continue;
-
-					if (rectsOverlap(rect, itCheck->second.rect, 0.7f))
-					{
-						foundTrail = itCheck;
-						break;
-					}
-				}
-
-				// 新規Region登録
-				if (foundTrail == trails.end())
-				{
-					itr = m_pStructData->insertRegion(m_curCamera, frame, itTrail->first, rect, itTrail->second.type);
-
-					m_pStructData->setRegionFlags(itr, SRegion::FlagTracked);
-
-					itTrail->second.lastFrame = frame;
-					itTrail->second.life = InitialLife;
-					itTrail->second.rect = rect;
-				}
-			}
-
-			--itTrail->second.life;
-			if (itTrail->second.life <= 0)
-				eraseSet.insert(itTrail->first);
-		}	// for (itTrail = trails.begin(); itTrail != trails.end(); ++itTrail)
-
-		// トラッキングされなかったTrailの削除
-		std::set<int>::iterator its;
-		for (its = eraseSet.begin(); its != eraseSet.end(); ++its)
-			trails.erase(*its);
-
-		// Trailの更新
-		StructData::iterator<SRegion> itr, itNext, itNew;
-		std::set<int> integratedSet;
-		for (itr = m_pStructData->regionBegin(m_curCamera, frame); itr != m_pStructData->regionEnd();)
-		{
-			itNext = itr;
-			++itNext;
-
-			if (std::find(m_TargetType.begin(), m_TargetType.end(), itr->type) == m_TargetType.end())
-			{
-				itr = itNext;
-				continue;
-			}
-			if (m_pStructData->checkRegionFlags(itr, SRegion::FlagTracked))
-			{
-				itr = itNext;
-				continue;
-			}
-
-			if (integratedSet.find(itr.getID()) != integratedSet.end())
-				continue;
-
-			if (trails.find(itr->object) != trails.end())
-			{
-				//qDebug() << "********************************** not here **************************";
-				trails[itr->object].lastFrame = frame;//itr.getID();
-				trails[itr->object].life = InitialLife;
-				trails[itr->object].rect = itr->rect;
-			}
-			else
-			{
-				// 既存のTrailと重複があるか確認
-				std::map<int, STrail>::iterator foundTrail = trails.end();
-				for (itTrail = trails.begin(); itTrail != trails.end(); ++itTrail)
-				{
-					if (itTrail->second.lastFrame != frame)
-						continue;
-
-					if (rectsOverlap(itr->rect, itTrail->second.rect, 0.7f))
-					{
-						foundTrail = itTrail;
-						break;
-					}
-				}
-
-				if (foundTrail != trails.end())
-				{
-					foundTrail->second.lastFrame = frame;//itr.getID();
-					foundTrail->second.life = InitialLife;
-					foundTrail->second.rect = itr->rect;
-					foundTrail->second.type = itr->type;
-
-					m_pStructData->eraseObject(itr->object);
-
-					itNew = m_pStructData->insertRegion(m_curCamera, frame, foundTrail->first, foundTrail->second.rect, foundTrail->second.type);
-					//m_pStructData->setRegionFlags(itNew, SRegion::RegionFlag::TRACKED);
-					integratedSet.insert(itNew.getID());
-				}
-				else
-				{
-					// 新規に追跡を開始
-					trails[itr->object].lastFrame = frame;//itr.getID();
-					trails[itr->object].life = InitialLife;
-					trails[itr->object].rect = itr->rect;
-					trails[itr->object].type = itr->type;
-				}
-			}
-			itr = itNext;
-		}	// for (itr = m_pStructData->regionBegin(0, frame); itr != m_pStructData->regionEnd();)
-
-		// 古い画像キャッシュのクリア
-		while (grayImages.size() > NumImageCache)
-			grayImages.erase(grayImages.begin());
-	}	// for (unsigned int frame = startFrame + 1; frame <= endFrame; ++frame)
-}
-
-void QtHOG::on_actionRead_ICV_triggered()
-{
-	return;
-	
-	// ICVファイルの読込み
-	QString selFilter = "";
-	QString fileName = QFileDialog::getOpenFileName(this,
-													tr("Read ICV data"), QDir::currentPath(),
-													tr("ICV data file (*.icv)"), &selFilter
-													);
-
-	if (fileName.isEmpty())
-		return;
-
-	//m_pStructData->importICV(fileName.toLocal8Bit());
 }
 
 bool calcS(MathUtil::Vec3d p0, MathUtil::Vec3d p1, MathUtil::Vec3d d0, MathUtil::Vec3d d1, double &s0, double &s1)
@@ -2196,65 +1288,6 @@ bool QtHOG::objectTracking(int startFrame, int endFrame)
 			cv::Point foundPos;
 			foundPos.x = searchRoi.x + maxPos.x;
 			foundPos.y = searchRoi.y + maxPos.y;
-
-			// CPU版 //
-			// SVM でチェックする
-			if (itTrail->second.type == SRegion::TypeFace)
-			{
-				int portraitSize = sourceRect.width * 2;
-				float scale = (float)HogUtils::RESIZE_X * 2 / (float)portraitSize;
-
-				cv::Mat searchResize;
-				cv::resize(searchClone, searchResize, cv::Size(searchClone.size().width * scale, searchClone.size().height * scale));
-				cv::HOGDescriptor hog(cv::Size(96, 96), cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, -1, 0.2, false, 1);
-				
-				while (true)
-				{
-					cv::minMaxLoc(searchResult, 0, &maxCorr, 0, &maxPos);
-
-					if (maxCorr < CorrThresh)
-						break;
-
-					cv::Rect foundRect((maxPos.x - sourceRect.width * 0.5 - marginWidth) * scale, (maxPos.y - sourceRect.height * 0.5  - marginHeight) * scale,
-										HogUtils::RESIZE_X * 2, HogUtils::RESIZE_Y * 2);
-
-					if (foundRect.x < 0)
-					{
-						searchResult.at<float>(maxPos.y, maxPos.x) = 0;
-						continue;
-					}
-					if (foundRect.y < 0)
-					{
-						searchResult.at<float>(maxPos.y, maxPos.x) = 0;
-						continue;
-					}
-					if (foundRect.x >= searchResize.size().width - foundRect.width)
-					{
-						searchResult.at<float>(maxPos.y, maxPos.x) = 0;
-						continue;
-					}
-					if (foundRect.y >= searchResize.size().height - foundRect.height)
-					{
-						searchResult.at<float>(maxPos.y, maxPos.x) = 0;
-						continue;
-					}
-
-					cv::Mat img = searchResize(foundRect);
-					std::vector<float> d;
-					hog.compute(img, d, cv::Size(8, 8), cv::Size(0, 0));
-					cv::Mat descriptors(1, Constants::HogDim, CV_32FC1, &d[0]);
-
-					float score = m_svm->predict(descriptors, true);
-					if(score <= m_FaceThreshold)
-					{
-						foundPos.x = searchRoi.x + maxPos.x;
-						foundPos.y = searchRoi.y + maxPos.y;
-						break;
-					}
-
-					searchResult.at<float>(maxPos.y, maxPos.x) = 0;
-				}	// while (true)
-			}
 
 			foundPos.x -= marginWidth;
 			foundPos.y -= marginHeight;
@@ -2415,12 +1448,6 @@ bool QtHOG::objectTracking(int startFrame, int endFrame)
 void QtHOG::on_actionFace_CV_Tracking_triggered()
 {	
 
-	if (!m_svm)
-	{
-		if (!readSVMData())
-			return;
-	}
-
 	//映像が読み込まれていないなら処理できない
 	if( m_pAviManager->getFrameCount() == 0 )
 	{
@@ -2433,10 +1460,6 @@ void QtHOG::on_actionFace_CV_Tracking_triggered()
 
 	if (!objectTracking(m_pAviManager->getFrameCount() - 1, 0))
 		return;
-}
-
-void QtHOG::on_actionShow_skin_score_triggered()
-{
 }
 
 void QtHOG::on_actionShow_Faces_triggered()
@@ -2699,11 +1722,6 @@ void QtHOG::setManualTarget(int object, int frame)
 
 void QtHOG::onItemDoubleClicked(int object, int frame, bool bCtrl)
 {
-	if (!m_svm)
-	{
-		if (!readSVMData())
-			return;
-	}
 
 	StructData::iterator<SRegion> itr;
 	CvRect predictRect;
@@ -2743,14 +1761,10 @@ void QtHOG::onItemDoubleClicked(int object, int frame, bool bCtrl)
 	else
 	{
 		// 自動トラッキング処理
-		//qDebug() << "before predictTrackingRectWithSVM";
 
 		CvRect trackingRect;
-		//if (predictTrackingRect(predictPos, frame, object, searchRange, trackingRect))
-		if (predictTrackingRectWithSVM(predictPos, frame, object, searchRange, trackingRect))
+		if (predictTrackingRect(predictPos, frame, object, searchRange, trackingRect))
 		{
-			//qDebug() << "after predictTrackingRectWithSVM";
-
 
 			std::vector<int> faces;
 			int lastSelected;
@@ -2778,12 +1792,6 @@ void QtHOG::onItemDoubleClicked(int object, int frame, bool bCtrl)
 
 			setFrame(frame, true);
 
-			if (trackTarget > 0)
-			{
-				m_selectedItems.insert(trackTarget);
-				m_lastSelected = trackTarget;
-				m_pDlgFaceGrid->execMerge();
-			}
 			emit sgSelectionChanged();
 		}
 		else
@@ -2799,10 +1807,8 @@ void QtHOG::onItemDoubleClicked(int object, int frame, bool bCtrl)
 	}
 }
 
-bool QtHOG::predictTrackingRectWithSVM(QPointF predictPos, int frame, int object, int searchRange, CvRect &newRect)
+bool QtHOG::predictTrackingRect(QPointF predictPos, int frame, int object, int searchRange, CvRect &newRect)
 {	
-	if (!m_svm)
-		return false;
 
 	// 最寄のソース画像を取得
 	StructData::iterator<SRegion> itr, itSource;
@@ -2904,7 +1910,7 @@ bool QtHOG::predictTrackingRectWithSVM(QPointF predictPos, int frame, int object
 	/////ここでひっかかるならフォーマットか何かの指定間違えてる
 	if( *(searchClone.size.p) < *(patch.size.p) )
 	{
-		qDebug() << "ileagle : predictTrackingRectWithSVM";
+		qDebug() << "ileagle : predictTrackingRect";
 		return false;
 	}
 	cv::Mat searchResult;
@@ -2924,71 +1930,6 @@ bool QtHOG::predictTrackingRectWithSVM(QPointF predictPos, int frame, int object
 	newRect.x = searchRoi.x + maxPos.x;
 	newRect.y = searchRoi.y + maxPos.y;
 
-
-	if (std::find(m_TargetType.begin(), m_TargetType.end(), Constants::TypeFace) != m_TargetType.end())
-	{
-		int portraitSize = itSource->rect.width * 2;//最初からfloatにすればいいのに
-		if( portraitSize == 0 ) portraitSize = 1;
-		float scale = (float)HogUtils::RESIZE_X * 2 / (float)portraitSize;
-
-		cv::Mat searchResize;
-		cv::resize(searchClone, searchResize, cv::Size(searchClone.size().width * scale, searchClone.size().height * scale));
-
-		cv::HOGDescriptor hog(cv::Size(96, 96), cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, -1, 0.2, false, 1);
-		cv::Mat img;
-
-		while (true)
-		{
-			cv::minMaxLoc(searchResult, 0, &maxCorr, 0, &maxPos);
-
-			if (maxCorr < CorrThresh)
-				return false;
-
-			cv::Rect foundRect((maxPos.x - itSource->rect.width * 0.5 - widthMargin) * scale, (maxPos.y - itSource->rect.height * 0.5 - heightMargin) * scale,
-								HogUtils::RESIZE_X * 2, HogUtils::RESIZE_Y * 2);
-
-			if (foundRect.x < 0)
-			{
-				searchResult.at<float>(maxPos.y, maxPos.x) = 0;
-				continue;
-			}
-			if (foundRect.y < 0)
-			{
-				searchResult.at<float>(maxPos.y, maxPos.x) = 0;
-				continue;
-			}
-			if (foundRect.x >= searchResize.size().width - foundRect.width)
-			{
-				searchResult.at<float>(maxPos.y, maxPos.x) = 0;
-				continue;
-			}
-			if (foundRect.y >= searchResize.size().height - foundRect.height)
-			{
-				searchResult.at<float>(maxPos.y, maxPos.x) = 0;
-				continue;
-			}
-
-			img = searchResize(foundRect);
-
-			std::vector<float> d;
-			hog.compute(img, d, cv::Size(8, 8), cv::Size(0, 0));
-			
-			cv::Mat descriptors(1, Constants::HogDim, CV_32FC1, &d[0]);
-
-			float score = m_svm->predict(descriptors, true);
-			if (score <= m_FaceThreshold)
-			{
-				newRect = sourceRect;
-				newRect.x = searchRoi.x + maxPos.x;
-				newRect.y = searchRoi.y + maxPos.y;
-				break;
-			}
-
-			searchResult.at<float>(maxPos.y, maxPos.x) = 0;
-		}
-
-	}
-
 	newRect.x -= widthMargin;
 	newRect.y -= heightMargin;
 
@@ -3004,54 +1945,11 @@ bool QtHOG::predictTrackingRectWithSVM(QPointF predictPos, int frame, int object
 	return true;//!bColorReject;
 }
 
-void QtHOG::on_actionRead_Project_File_triggered()
-{
-	return;
-
-	m_pStructData->clearAll();
-
-	QString selFilter = "";
-	QString fileName = QFileDialog::getOpenFileName(this,
-													tr("Read project file"), QDir::currentPath(),
-													tr("project file (*.fcp);;All files (*.*)"), &selFilter,
-													QFileDialog::ReadOnly);
-
-	if (fileName.isEmpty())
-		return;
-
-	QFile file;
-	file.setFileName(fileName);
-	if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
-		return;
-	QTextStream in(&file);
-	while (!in.atEnd()) {
-		QString line = in.readLine();
-		if (line.section('.', -1) == "avi")
-		{
-			readAvi(line);
-		}
-		else if (line.section('.', -1) == "rgn")
-		{
-			m_pStructData->readRegions(line.toLocal8Bit(), m_pAviManager->getWidth(), m_pAviManager->getHeight());
-		}
-		else if (line.section('.', -1) == "icv")
-		{
-			//m_pStructData->importICV(line.toLocal8Bit());
-		}
-	}
-	file.close();
-}
-
 void QtHOG::onAutoTrackingRequired(int object, int mode)
 {
 
 	// とりあえずセーブ
 	onIdle(true);
-	if (!m_svm)
-	{
-		if (!readSVMData())
-			return;
-	}
 
 	StructData::iterator<SRegion> itr;
 	StructData::reverse_iterator<SRegion> itrr;
@@ -3088,7 +1986,7 @@ void QtHOG::onAutoTrackingRequired(int object, int mode)
 
 			// 自動トラッキング処理
 			CvRect trackingRect;
-			if (predictTrackingRectWithSVM(predictPos, frame, object, searchRange, trackingRect))
+			if (predictTrackingRect(predictPos, frame, object, searchRange, trackingRect))
 			{
 				// 既存領域との重複をチェック
 				std::vector<int> faces;
@@ -3168,7 +2066,7 @@ void QtHOG::onAutoTrackingRequired(int object, int mode)
 
 			// 自動トラッキング処理
 			CvRect trackingRect;
-			if (predictTrackingRectWithSVM(predictPos, frame, object, searchRange, trackingRect))
+			if (predictTrackingRect(predictPos, frame, object, searchRange, trackingRect))
 			{
 				// 既存領域との重複をチェック
 				std::vector<int> faces;
@@ -3250,7 +2148,7 @@ void QtHOG::onAutoTrackingRequired(int object, int mode)
 
 			// 自動トラッキング処理
 			CvRect trackingRect;
-			if (predictTrackingRectWithSVM(predictPos, frame, object, searchRange, trackingRect))
+			if (predictTrackingRect(predictPos, frame, object, searchRange, trackingRect))
 			{
 				// 既存領域との重複をチェック
 				std::vector<int> faces;
@@ -3333,96 +2231,6 @@ void QtHOG::onAutoTrackingRequired(int object, int mode)
 
 	m_lockonTarget = -1;
 }
-
-void QtHOG::on_actionExtract_MSER_triggered()
-{
-	cv::MSER mser;
-	int w = m_pAviManager->getWidth();
-	int h = m_pAviManager->getHeight();
-	m_pStructData->mutex.lock();
-	cv::Mat check = m_pAviManager->getImage(ui.sliderFrame->value());
-	m_pStructData->mutex.unlock();
-
-	cv::Mat gray(h, w, CV_8UC1), mask(h, w, CV_8UC1, 0);
-	cv::cvtColor(check, gray, CV_BGR2GRAY);
-
-	cv::Scalar mean, stddev;
-	meanStdDev(gray, mean, stddev);
-	//qDebug() << mean[0] << mean[1] << mean[2] << mean[3] << stddev[0] << stddev[1] << stddev[2];
-
-	for (int row = 0; row < gray.rows; ++row)
-	{
-		for (int col = 0; col < gray.cols * 0.7; ++col)
-		{
-			int i = 255 * tanh((gray.at<uchar>(row, col) - mean[0]) * 0.8 / stddev[0]) + 127;
-			gray.at<uchar>(row, col) = i > 255 ? 255 : (i < 0 ? 0 : i);
-		}
-	}
-
-	cv::namedWindow("gray", CV_WINDOW_AUTOSIZE);
-	cv::imshow("gray", gray);
-	//cvWaitKey(0);
-
-	cv::Mat tmp_img(check.size(), IPL_DEPTH_16S, 1);
-	cv::Mat dst_img1(check.size(), IPL_DEPTH_8U, 1);
-
-	// (2)Sobelフィルタによる微分画像の作成
-	cv::Sobel (gray, tmp_img, tmp_img.depth(), 1, 0);
-	cv::convertScaleAbs (tmp_img, dst_img1);
-
-	cv::namedWindow("sobel");
-	cv::imshow("sobel", dst_img1);
-
-/*
-	qDebug() << "pre mser";
-
-	std::vector< std::vector<cv::Point> > msers;
-	mser( gray, msers, mask);
-
-	qDebug() << "post mser";
-
-	for( int i = 0; i < msers.size(); i++){
-		CvScalar rgb = CV_RGB(rand()%256, rand()%256, rand()%256);
-
-		for( int j = 0; j < msers.at(i).size(); j++ ){
-			//cv::circle(check, msers.at(i).at(j), 1, rgb, 1, 8, 0 );
-			cv::line(check, msers.at(i).at(j), msers.at(i).at(j), rgb);
-		}
-	}
-
-	cv::namedWindow("MSERS", CV_WINDOW_AUTOSIZE);
-	cv::imshow("MSERS", check);
-*/
-}
-
-int * map_to_flatmap(float * map, unsigned int size)
-{
-  /********** Flatmap **********/
-  int *flatmap      = (int *) malloc(size*sizeof(int)) ;
-  for (unsigned int p = 0; p < size; p++)
-  {
-    flatmap[p] = map[p];
-  }
-
-  bool changed = true;
-  while (changed)
-  {
-    changed = false;
-    for (unsigned int p = 0; p < size; p++)
-    {
-      changed = changed || (flatmap[p] != flatmap[flatmap[p]]);
-      flatmap[p] = flatmap[flatmap[p]];
-    }
-  }
-
-  /* Consistency check */
-  for (unsigned int p = 0; p < size; p++)
-    assert(flatmap[p] == flatmap[flatmap[p]]);
-
-  return flatmap;
-}
-
-//const float RgbScale = 32.0f;
 
 void QtHOG::on_actionSet_Blur_Intensity_For_Faces_triggered()
 {
@@ -3885,558 +2693,6 @@ bool QtHOG::exportMaskedIZIC(const QString &fileName, int startFrame, int endFra
 
 
 
-// 未使用
-void QtHOG::on_actionSet_Color_Threshold_triggered()
-{
-}
-
-void QtHOG::on_actionSVM_Learning_triggered()
-{
-	QStringList dirName;
-    QFileDialog f;
-	f.setWindowIcon(QIcon(":/Icon/AppIcon"));
-    f.setFileMode(QFileDialog::DirectoryOnly);
-    if (f.exec())
-        dirName = f.selectedFiles();
-
-	if (dirName.isEmpty())
-		return;
-
-	QDir dir(dirName[0]);
-	dir.setFilter(QDir::Files | QDir::Hidden | QDir::NoSymLinks);
-
-	QFileInfoList list = dir.entryInfoList();
-
-	std::vector<float> data;
-	std::vector<int> res;
-
-	// CPU版 //
-	cv::HOGDescriptor hog(cv::Size(96, 96), cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, -1, 0.2, false, 1);
-	cv::Mat img(HogUtils::RESIZE_Y * 2, HogUtils::RESIZE_X * 2, CV_8UC1);
-	
-	int pcount(0), ncount(0), descSize(-1);
-	for (int i = 0; i < list.size(); ++i)
-	{
-		QFileInfo fileInfo = list.at(i);
-
-		QString filePath = fileInfo.path();
-		QString fileBase = fileInfo.baseName();
-		QString fileExt = fileInfo.suffix();
-
-		if (!(fileExt == "jpg" || fileExt == "png")) continue;
-
-		bool bPositive = (fileBase.indexOf("positive") >= 0);
-		if (!bPositive && fileBase.indexOf("negative") < 0)
-			continue;
-
-		cv::Mat sample = cv::imread(fileInfo.filePath().toStdString(), CV_LOAD_IMAGE_GRAYSCALE);
-		cv::Mat resizeImage;//, colorResizeImage;
-		cv::resize(sample, resizeImage, cv::Size(HogUtils::RESIZE_Y * 2, HogUtils::RESIZE_X * 2));
-		
-		std::vector<float> d;
-		hog.compute(resizeImage, d, cv::Size(8, 8), cv::Size(0, 0));
-		cv::Mat descriptors(1, Constants::HogDim, CV_32FC1, &d[0]);
-
-		if (descSize < 0)
-			descSize = descriptors.cols * descriptors.rows;
-
-		int curIndex = data.size();
-		data.resize(data.size() + descSize);
-
-		for (int i = 0; i < descriptors.rows; ++i)
-			for (int j = 0; j < descriptors.cols; ++j)
-				data[curIndex++] = descriptors.at<float>(i, j); 
-
-		if (bPositive)
-		{
-			res.push_back(1);
-			pcount++;
-		}
-		else
-		{
-			res.push_back(0);
-			ncount++;
-		}
-	}
-
-
-	CvMat data_mat, res_mat;
-	CvTermCriteria criteria;
-	CvSVM svm = CvSVM ();
-	CvSVMParams param;
-
-	// (3)SVM学習データとパラメータの初期化
-	cvInitMatHeader (&data_mat, pcount + ncount, descSize, CV_32FC1, &data[0]);
-	cvInitMatHeader (&res_mat, pcount + ncount, 1, CV_32SC1, &res[0]);
-	criteria = cvTermCriteria (CV_TERMCRIT_EPS, 100000, FLT_EPSILON);
-	param = CvSVMParams (CvSVM::C_SVC/*CvSVM::ONE_CLASS*/, CvSVM::LINEAR, 10.0, 0.09, 1.0, 10.0, 0.5, 1.0, NULL, criteria);
-	
-	svm.train (&data_mat, &res_mat, NULL, NULL, param);
-
-	// SVMデータ書き出し
-	QString selFilter = "";
-	QString fileName = QFileDialog::getSaveFileName(this,
-													tr("Write SVM data"), QDir::currentPath(),
-													tr("SVM data (*.xml)"), &selFilter
-													);
-	if (fileName.isEmpty())
-		return;
-
-	svm.save(fileName.toLocal8Bit());
-}
-
-bool QtHOG::readPCAdata()
-{
-	if (m_pPCA)
-	{
-		delete m_pPCA;
-		m_pPCA = 0;
-	}
-
-	QString selFilter = "";
-	QString fileName = QFileDialog::getOpenFileName(this,
-													tr("Read PCA data"), QDir::currentPath(),
-													tr("PCA data(*.yml);;All files (*.*)"), &selFilter);
-
-	if (fileName.isEmpty())
-		return false;
-
-	m_pPCA = new cv::PCA();
-	cv::FileStorage fs(fileName.toStdString(), cv::FileStorage::READ);
-	
-	cv::Mat eval, evec, mean;
-	fs["eigenvalues"] >> eval;
-	fs["eigenvectors"] >> evec;
-	fs["mean"] >> mean;
-	/*
-	fs["eigen value"] >> m_pPCA->eigenvalues;
-	fs["eigen vector"] >> m_pPCA->eigenvectors;
-	fs["mean"] >> m_pPCA->mean;
-	*/
-	m_pPCA->eigenvalues = eval;
-	m_pPCA->eigenvectors = evec;
-	m_pPCA->mean = mean;
-
-	return true;
-}
-
-void QtHOG::on_actionHead_Shoulder_SVM_Learning_triggered()
-{
-	return;
-
-	if (!m_pPCA)
-	{
-		if (!readPCAdata())
-			return;
-	}
-
-	QStringList dirName;
-    QFileDialog f;
-	f.setWindowIcon(QIcon(":/Icon/AppIcon"));
-    f.setFileMode(QFileDialog::DirectoryOnly);
-    if (f.exec())
-        dirName = f.selectedFiles();
-
-	if (dirName.isEmpty())
-		return;
-
-	QDir dir(dirName[0]);
-	dir.setFilter(QDir::Files | QDir::Hidden | QDir::NoSymLinks);
-
-	QFileInfoList list = dir.entryInfoList();
-
-	std::vector<float> data;
-	std::vector<int> res;
-
-
-	int pcount(0), ncount(0), descSize(-1);
-	for (int i = 0; i < list.size(); ++i)
-	{
-		QFileInfo fileInfo = list.at(i);
-
-		QString filePath = fileInfo.path();
-		QString fileBase = fileInfo.baseName();
-		QString fileExt = fileInfo.suffix();
-
-		if (fileExt != "png")
-			continue;
-
-		bool bPositive = (fileBase.indexOf("positive") >= 0);
-		if (!bPositive && fileBase.indexOf("negative") < 0)
-			continue;
-
-		cv::Mat sample = cv::imread(fileInfo.filePath().toStdString(), CV_LOAD_IMAGE_GRAYSCALE);
-	
-		std::vector<float> feat, featLBP;
-		Detector::getHoG(sample, feat);
-		Detector::getLBP(sample, featLBP);
-
-		for (int i = 0; i < featLBP.size(); ++i)
-			feat.push_back(featLBP[i]);
-
-		// PCA による次元圧縮
-		cv::Mat src(1, feat.size(), CV_32FC1, &(feat[0]));
-		cv::Mat result = m_pPCA->project(src);
-
-		if (descSize < 0)
-			//descSize = feat.size();
-			descSize = result.cols;
-
-		int curIndex = data.size();
-		data.resize(data.size() + descSize);
-
-		/*
-		for (int i = 0; i < descriptors.rows; ++i)
-			for (int j = 0; j < descriptors.cols; ++j)
-				data[curIndex++] = descriptors.at<float>(i, j); 
-		*/
-		for (int i = 0; i < descSize; ++i)
-			data[curIndex++] =result.at<float>(0, i);// feat[i];
-
-		if (bPositive)
-		{
-			res.push_back(1);
-			pcount++;
-		}
-		else
-		{
-			res.push_back(0);
-			ncount++;
-		}
-	}
-	CvMat data_mat, res_mat;
-	CvTermCriteria criteria;
-	CvSVM svm = CvSVM ();
-	CvSVMParams param;
-
-	// (3)SVM学習データとパラメータの初期化
-	cvInitMatHeader (&data_mat, pcount + ncount, descSize, CV_32FC1, &data[0]);
-	cvInitMatHeader (&res_mat, pcount + ncount, 1, CV_32SC1, &res[0]);
-	criteria = cvTermCriteria (CV_TERMCRIT_EPS, 100000, FLT_EPSILON);
-	param = CvSVMParams (CvSVM::C_SVC/*CvSVM::ONE_CLASS*/, CvSVM::LINEAR, 10.0, 0.09, 1.0, 10.0, 0.5, 1.0, NULL, criteria);
-
-	// (4)SVMの学習とデータの保存
-	svm.train (&data_mat, &res_mat, NULL, NULL, param);
-
-	// SVMデータ書き出し
-	QString selFilter = "";
-	QString fileName = QFileDialog::getSaveFileName(this,
-													tr("Write SVM data"), QDir::currentPath(),
-													tr("SVM data (*.xml)"), &selFilter
-													);
-	if (fileName.isEmpty())
-		return;
-
-	svm.save(fileName.toLocal8Bit());
-}
-
-void QtHOG::on_actionPCA_with_samples_triggered()
-{
-	return;
-
-	QStringList dirName;
-    QFileDialog f;
-	f.setWindowIcon(QIcon(":/Icon/AppIcon"));
-    f.setFileMode(QFileDialog::DirectoryOnly);
-    if (f.exec())
-        dirName = f.selectedFiles();
-
-	if (dirName.isEmpty())
-		return;
-
-	QDir dir(dirName[0]);
-	dir.setFilter(QDir::Files | QDir::Hidden | QDir::NoSymLinks);
-
-	QFileInfoList list = dir.entryInfoList();
-
-	std::vector<float> featHOG, featLBP;
-
-	int pcount(0), ncount(0), descSize(-1);
-	int numData = 0;
-	for (int i = 0; i < list.size(); ++i)
-	{
-		//qDebug() << "i" << i;
-
-		QFileInfo fileInfo = list.at(i);
-
-		//QString filePath = fileInfo.path();
-		QString fileBase = fileInfo.baseName();
-		QString fileExt = fileInfo.suffix();
-
-		if (fileExt != "png")
-			continue;
-
-		bool bPositive = (fileBase.indexOf("positive") >= 0);
-		if (!bPositive && fileBase.indexOf("negative") < 0)
-			continue;
-
-		++numData;
-	}
-
-	//std::vector<float> data(numSample * (3024 + 4956));
-	cv::Mat dataMat(numData, 1620 + 2655, CV_32FC1);
-	std::vector<int> res;
-	cv::Mat sample;
-
-	int curIndex = 0;
-	for (int i = 0; i < list.size(); ++i)
-	{
-		qDebug() << "i" << i;
-
-		QFileInfo fileInfo = list.at(i);
-
-		QString filePath = fileInfo.path();
-		QString fileBase = fileInfo.baseName();
-		QString fileExt = fileInfo.suffix();
-
-		if (fileExt != "png")
-			continue;
-
-		bool bPositive = (fileBase.indexOf("positive") >= 0);
-		if (!bPositive && fileBase.indexOf("negative") < 0)
-			continue;
-
-		sample = cv::imread(fileInfo.filePath().toStdString(), CV_LOAD_IMAGE_GRAYSCALE);
-
-		Detector::getHoG(sample, featHOG);
-		Detector::getLBP(sample, featLBP);
-
-		//for (int i = 0; i < featLBP.size(); ++i)
-		//	feat.push_back(featLBP[i]);
-
-		//std::vector<float> feat;
-		//Detector::getHoG(sample, feat);
-
-		if (descSize < 0)
-			descSize = featHOG.size() + featLBP.size();
-
-		//int curIndex = data.size();
-		//data.resize(data.size() + descSize);
-
-		for (int j = 0; j < featHOG.size(); ++j)
-			dataMat.at<float>(curIndex, j) = featHOG[j];
-		
-		for (int j = 0; j < featLBP.size(); ++j)
-			dataMat.at<float>(curIndex, j + featHOG.size()) = featLBP[j];
-
-		curIndex++;
-	}
-
-	//int numData = data.size() / descSize;
-	//cv::Mat dataMat(numData, descSize, CV_32FC1);
-/*
-	for (int i = 0; i < numData; ++i)
-	{
-		for (int j = 0; j < descSize; ++j)
-			dataMat.at<float>(i, j) = data[i * descSize + j];
-	}
-*/
-	cv::PCA pca(dataMat, cv::Mat(), CV_PCA_DATA_AS_ROW, 200);
-
-	qDebug() << numData << descSize;
-	qDebug() << pca.eigenvalues.rows << pca.eigenvalues.cols;
-	qDebug() << pca.eigenvectors.rows << pca.eigenvectors.cols;
-	qDebug() << pca.mean.rows << pca.mean.cols;
-
-	// SVMデータ書き出し
-	QString selFilter = "";
-	QString fileName = QFileDialog::getSaveFileName(this,
-													tr("Write PCA data"), QDir::currentPath(),
-													tr("PCA data (*.yml)"), &selFilter
-													);
-	if (fileName.isEmpty())
-		return;
-
-//	svm.save(fileName.toLocal8Bit());
-
-	cv::FileStorage fs(fileName.toStdString(), cv::FileStorage::WRITE);
-	fs << "eigenvalues" << pca.eigenvalues;
-	fs << "eigenvectors" << pca.eigenvectors;
-	fs << "mean" << pca.mean;
-}
-
-//bool QtHOG::detectFaceInRegion7(CvSVM *svm, cv::Mat image, const CvRect &rect, cv::Point &facePos)
-//{
-//	if(image.empty()) { return false; }
-//	if(rect.width >= rect.height) return false;	// 横長画像ではresizeRect.heightがマイナスになる。正方形なら０ 
-//	int faceSize = rect.width / 4;
-//	int portraitSize = faceSize * 2;
-//
-//	float scale = (float)HogUtils::RESIZE_X * 2 / (float)portraitSize;
-//	CvRect resizeRect;
-//	resizeRect.width = scale * rect.width;
-//	resizeRect.height = scale * rect.height;
-//
-//	cv::Mat rectImage = image(cv::Rect(rect));
-//	cv::Mat resizeImage;
-//	cv::resize(rectImage, resizeImage, cv::Size(resizeRect.width, resizeRect.height));
-//
-//	cv::Mat grayRect;
-//	cv::cvtColor(resizeImage, grayRect, CV_BGR2GRAY);
-//
-//	//float data[HogUtils::TOTAL_DIM];
-//	CvMat m;
-//	cvInitMatHeader (&m, 1, Constants::HogDim, CV_32FC1, NULL);
-//
-//	float minScore = -1;
-//
-//	int xmargin = resizeRect.width / 8;
-//	int ymargin = 0;
-//
-//	//cv::Mat scoreMat(resizeRect.width, resizeRect.height, CV_32F, cv::Scalar(0)); 
-//	cv::Mat scoreMat(resizeRect.height, resizeRect.width, CV_32F, cv::Scalar(0)); 
-//
-//	cv::gpu::HOGDescriptor hog(cv::Size(96, 96), cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8),
-//								9, cv::gpu::HOGDescriptor::DEFAULT_WIN_SIGMA, 0.2, false, 1);
-//
-//	cv::gpu::GpuMat gpu_img, search_img;	
-//	cv::gpu::GpuMat gpuDescriptors;
-//
-//	search_img.upload(grayRect);
-//
-//	int x;
-//	for (int y = ymargin; y < resizeRect.height * 0.4 - HogUtils::RESIZE_Y * 2; y += 6)
-//	{
-//		for (x = xmargin; x < resizeRect.width - HogUtils::RESIZE_X * 2 - xmargin; x += 6)
-//		{
-//			gpu_img = search_img(cv::Rect(x, y, HogUtils::RESIZE_X * 2, HogUtils::RESIZE_Y * 2));
-//			cv::Mat descriptors;
-//
-//			hog.getDescriptors(gpu_img, cv::Size(8, 8), gpuDescriptors);
-//			gpuDescriptors.download(descriptors);
-//
-//			if (svm->predict(descriptors))
-//			{
-//				for (int yy = y + HogUtils::RESIZE_Y * 0.5; yy < y + 1.5 * HogUtils::RESIZE_Y; ++yy)
-//				{
-//					for (int xx = x + HogUtils::RESIZE_X * 0.5; xx < x + 1.5 * HogUtils::RESIZE_X; ++xx)
-//					{
-//						scoreMat.at<float>(yy, xx) += HogUtils::RESIZE_Y * 0.5 - abs(yy - y - HogUtils::RESIZE_Y);
-//						scoreMat.at<float>(yy, xx) += HogUtils::RESIZE_X * 0.5 - abs(xx - x - HogUtils::RESIZE_X);
-//					}
-//				}
-//				//cv::Point p(x + HogUtils::RESIZE_X, y + HogUtils::RESIZE_Y);
-//				//cv::line(checkImage, p, p, CV_RGB(255, 0, 0));
-//			}
-//		}
-//	}
-//
-//	double maxVal;
-//	cv::Point maxLoc;
-//	cv::minMaxLoc(scoreMat, 0, &maxVal, 0, &maxLoc);
-//
-//	facePos.x = (float)maxLoc.x / scale;
-//	facePos.y = (float)maxLoc.y / scale;
-//
-//	qDebug() << "score" << maxVal;
-//
-//	gpu_img.release();
-//	search_img.release();
-//	gpuDescriptors.release();
-//	
-//	return (maxVal > 250.0f);
-//}
-//
-bool QtHOG::detectFaceInRegion7NoGPU(CvSVM *svm, cv::Mat image, const CvRect &rect, cv::Point &facePos)
-{
-	if(image.empty()) { return false; }
-	if(rect.width >= rect.height) return false;	// 横長画像ではresizeRect.heightがマイナスになる。正方形なら０ 
-	
-	int faceSize = rect.width / 4;
-	int portraitSize = faceSize * 2;
-
-	float scale = (float)HogUtils::RESIZE_X * 2 / (float)portraitSize;
-	CvRect resizeRect;
-	resizeRect.width = scale * rect.width;
-	resizeRect.height = scale * rect.height;
-
-	cv::Mat rectImage = image(cv::Rect(rect));
-	cv::Mat resizeImage;
-	cv::resize(rectImage, resizeImage, cv::Size(resizeRect.width, resizeRect.height));
-
-	cv::Mat grayRect;
-	cv::cvtColor(resizeImage, grayRect, CV_BGR2GRAY);
-
-	float minScore = -1;
-
-	int xmargin = resizeRect.width / 8;
-	int ymargin = 0;
-
-	//cv::Mat scoreMat(resizeRect.width, resizeRect.height, CV_32F, cv::Scalar(0)); 
-	cv::Mat scoreMat(resizeRect.height, resizeRect.width, CV_32F, cv::Scalar(0)); 
-
-	cv::HOGDescriptor hog(cv::Size(96, 96), cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, -1, 0.2, false, 1);
-	//cv::gpu::HOGDescriptor hog(cv::Size(96, 96), cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, cv::gpu::HOGDescriptor::DEFAULT_WIN_SIGMA, 0.2, false, 1);
-
-	cv::Mat search_img = grayRect;
-	cv::Mat cpuDescriptors;
-
-	for (int y = ymargin; y < resizeRect.height * 0.4 - HogUtils::RESIZE_Y * 2; y += 6)
-	{
-		for (int x = xmargin; x < resizeRect.width - HogUtils::RESIZE_X * 2 - xmargin; x += 6)
-		{
-			cv::Mat img = search_img(cv::Rect(x, y, HogUtils::RESIZE_X * 2, HogUtils::RESIZE_Y * 2));
-			std::vector<float> d;
-			hog.compute(img, d, cv::Size(8, 8), cv::Size(0, 0));				
-			cv::Mat descriptors(1, Constants::HogDim, CV_32FC1, &d[0]);
-
-			float score = svm->predict(descriptors, true);
-			if (score <= m_FaceThreshold)
-			{
-				for (int yy = y + HogUtils::RESIZE_Y * 0.5; yy < y + 1.5 * HogUtils::RESIZE_Y; ++yy)
-				{
-					for (int xx = x + HogUtils::RESIZE_X * 0.5; xx < x + 1.5 * HogUtils::RESIZE_X; ++xx)
-					{
-						{
-							scoreMat.at<float>(yy, xx) += HogUtils::RESIZE_Y * 0.5 - abs(yy - y - HogUtils::RESIZE_Y);
-							scoreMat.at<float>(yy, xx) += HogUtils::RESIZE_X * 0.5 - abs(xx - x - HogUtils::RESIZE_X);
-						}
-					}
-				}
-			}
-		}
-	}
-
-	/*
-	for (int y = ymargin; y < resizeRect.height * 0.4 - HogUtils::RESIZE_Y * 2; y += 6)
-	{
-		for (int x = xmargin; x < resizeRect.width - HogUtils::RESIZE_X * 2 - xmargin; x += 6)
-		{
-			img = search_img(cv::Rect(x, y, HogUtils::RESIZE_X * 2, HogUtils::RESIZE_Y * 2));
-			std::vector<float> d;
-			hog.compute(img, d, cv::Size(8, 8), cv::Size(0, 0));				
-			cv::Mat descriptors(1, Constants::HogDim, CV_32FC1, &d[0]);
-
-			float score = svm->predict(descriptors, true);
-			if (score <= FaceThreshold)
-			{	
-				for (int yy = y + HogUtils::RESIZE_Y * 0.5; yy < y + 1.5 * HogUtils::RESIZE_Y; ++yy)
-				{
-					for (int xx = x + HogUtils::RESIZE_X * 0.5; xx < x + 1.5 * HogUtils::RESIZE_X; ++xx)
-					{
-						{
-							scoreMat.at<float>(yy, xx) += HogUtils::RESIZE_Y * 0.5 - abs(yy - y - HogUtils::RESIZE_Y);
-							scoreMat.at<float>(yy, xx) += HogUtils::RESIZE_X * 0.5 - abs(xx - x - HogUtils::RESIZE_X);
-						}
-					}
-				}
-			}
-		}
-	}
-	*/
-
-	double maxVal;
-	cv::Point maxLoc;
-	cv::minMaxLoc(scoreMat, 0, &maxVal, 0, &maxLoc);
-
-	facePos.x = (float)maxLoc.x / scale;
-	facePos.y = (float)maxLoc.y / scale;
-
-	qDebug() << "score" << maxVal;
-
-	return (maxVal > 250.0f);
-}
-
 void QtHOG::onScrollBack()
 {
 	int frame = ui.sliderFrame->value();
@@ -4562,11 +2818,6 @@ void QtHOG::onAutoBackwardTrackingRequiredByE()
 //そのフレームのすべての矩形に対してトラッキング実行
 void QtHOG::onAutoMultiTrackingRequiredByF()
 {
-	if (!m_svm)
-	{
-		if (!readSVMData())
-			return;
-	}
 
 	onIdle(true);
 	if (m_selectedItems.size() != 1)
@@ -4626,7 +2877,7 @@ void QtHOG::partTracking(int object, int frame)
 	QPointF predictPos(predictRect.x + predictRect.width / 2, predictRect.y + predictRect.height / 2);
 	
 	CvRect trackingRect;
-	if (predictTrackingRectWithSVM(predictPos, frame, object, searchRange, trackingRect))
+	if (predictTrackingRect(predictPos, frame, object, searchRange, trackingRect))
 	{
 		std::vector<int> faces;
 		int lastSelected;
@@ -4681,17 +2932,12 @@ void QtHOG::on_actionShowBatch_Dialog_triggered()
 
 	switch (m_detectMethod)
 	{
-	case Constants::DetectMethod::HOG:
-		if (!m_svm)
+	case Constants::DetectMethod::EXTERNAL:
+		TCHAR	filepath[MAX_PATH];
+		getInitialFileName(filepath);
+		if (!m_detector->setParameters(filepath))
 		{
-			if (!readSVMData())
-				return;
-		}
-		break;
-	case Constants::DetectMethod::SECUWATCHER:
-		if (!m_secuwatcherMask.setParameters(m_detectParam))
-		{
-			MessageBox(NULL, _T("secuwatcherMask initialize error"), _T("Masquerade"), MB_OK);
+			MessageBox(NULL, _T("detector initialize error"), _T("Masquerade"), MB_OK);
 			return;
 		}
 		break;
@@ -4763,23 +3009,15 @@ void QtHOG::on_actionShowBatch_Dialog_triggered()
 					if (m_bCancel)
 						break;
 
-					////detectHOG(frame, gpu_img);
-					//detect_Panoramic(frame);
-					//detectFaceInFrame(frame);
-
 					switch (m_imageType)
 					{
 					case Constants::ImageType::PANORAMIC:
 						//計測対象１
 						detect_Panoramic(frame);
-						//計測対象２
-						detectFaceInFrame(frame);
 						break;
 					case Constants::ImageType::PERSPECTIVE:
 						//計測対象１
 						detect_Perspective(frame);
-						//計測対象２
-						detectFaceInFrame(frame);
 						break;
 					default:
 						continue;
@@ -4792,25 +3030,6 @@ void QtHOG::on_actionShowBatch_Dialog_triggered()
 			}
 			if (m_bCancel)
 				break;
-
-			if (m_svm)		// SVMを使用しない場合は実施しないことにする。本当はUIを変更すべき...
-			{
-				// 顔トラッキング
-				startFrame = 0;
-				endFrame = m_pAviManager->getFrameCount() - 1;
-
-				if (batchInfoList[i].bTrackRange)
-				{
-					startFrame = std::min<int>(std::max<int>(0, batchInfoList[i].trackFrom), endFrame);
-					endFrame = std::max<int>(std::min<int>(batchInfoList[i].trackTo, endFrame), startFrame);
-				}
-
-				if (!objectTracking(startFrame, endFrame))
-					break;
-				if (!objectTracking(endFrame, startFrame))
-					break;
-			}
-
 
 			if (batchInfoList[i].bDetect)
 			{
@@ -4912,226 +3131,6 @@ void QtHOG::onIdle(bool bForce)
 	m_pTime->restart();
 }
 
-//void QtHOG::on_actionHaar_Detect_Test_triggered()
-//{
-//	return;
-//
-//	int frame = ui.sliderFrame->value();
-//
-//	cv::Mat frameImage;
-//
-//	m_pStructData->mutex.lock();
-//	cv::resize(m_pAviManager->getImage(frame), frameImage, cvSize(1000, 500));
-//	m_pStructData->mutex.unlock();
-//
-//	// 正面顔検出器のロード
-//	CvHaarClassifierCascade* cascade = (CvHaarClassifierCascade*)cvLoad( "C:\\Develop\\OpenCV2.2\\opencv\\data\\haarcascades\\haarcascade_profileface.xml" );
-//
-//	CvMemStorage* storage = cvCreateMemStorage(0);
-//	CvSeq* faces;
-//	int i;
-//
-//	// 顔検出
-//	faces = cvHaarDetectObjects( frameImage, cascade, storage, 1.2, 3, CV_HAAR_DO_CANNY_PRUNING , cvSize(10, 10), cvSize(100, 100) );
-//
-//	// 顔領域の描画
-//	for( i = 0; i < faces->total; i++ )
-//	{
-//	// extract the rectanlges only
-//		CvRect face_rect = *(CvRect*)cvGetSeqElem( faces, i );
-//		cvRectangle( frameImage, cvPoint(face_rect.x,face_rect.y),
-//		cvPoint((face_rect.x+face_rect.width),
-//		(face_rect.y+face_rect.height)),
-//		CV_RGB(255,0,0), 3 );
-//	}
-//
-//	// 画像の表示
-//	cvReleaseMemStorage( &storage );
-//	cvNamedWindow( "face_detect", 0 );
-//	cvShowImage( "face_detect", frameImage );
-//	cvWaitKey(0);
-//	cvReleaseHaarClassifierCascade( &cascade );
-//
-//	cvReleaseImage(&frameImage);
-//
-///*
-//	int width = m_pAviManager->getWidth();
-//	int height = m_pAviManager->getHeight();
-//	
-//	const int ResizeWidth = 2000;//2400;
-//	const int ResizeHeight = 1000;//1200;
-//	const int ResizeHalfHeight = ResizeHeight / 2;
-//
-//	
-//	m_pStructData->mutex.lock();
-//
-//	cv::Mat frameMat = m_pAviManager->getImage(frame);
-//	cv::Mat frameImage = frameMat.clone();
-//
-//	//cv::cvtColor(frameMat, frameImage, CV_BGR2GRAY);
-//	m_pStructData->mutex.unlock();
-//	//cv::Mat resizeImage;
-//	//cv::resize(frameMat, resizeImage, cv::Size(ResizeWidth, ResizeHeight));
-//	//cv::Mat halfImage = resizeImage(cv::Rect(0, ResizeHalfHeight, ResizeWidth, ResizeHalfHeight));
-//
-//	float scale = (float)ResizeWidth / (float)frameImage.size().width;
-//
-//	cv::gpu::GpuMat gpu_img;
-//	gpu_img.upload(frameImage);
-//	cv::gpu::CascadeClassifier_GPU classifier( "C:\\Develop\\OpenCV2.2\\opencv\\data\\haarcascades\\haarcascade_frontalface_default.xml");
-//
-//	if (classifier.empty())
-//		qDebug() << "empty";
-//
-//	cv::gpu::GpuMat objbuf;
-//	int detections_number = classifier.detectMultiScale(gpu_img, objbuf);
-//	qDebug() << "detections_number" << detections_number;
-//
-//	cv::Mat obj_host;
-//	// 矩形の検出数だけをダウンロードします．
-//	objbuf.colRange(0, detections_number).download(obj_host);
-//
-//	cv::Rect* faces = obj_host.ptr<cv::Rect>();
-//	for(int i = 0; i < detections_number; ++i)
-//		cv::rectangle(frameImage, faces[i], CV_RGB(255, 0, 0));
-//
-//	imshow("Faces", frameImage);
-//	*/
-//}
-//
-void QtHOG::on_actionDetect_Head_Shoulder_triggered()
-{
-	return;
-
-	if (!m_svm)
-	{
-		if (!readSVMData())
-			return;
-		//CvSVMParams p = m_svm->get_params();
-		//qDebug() << p.svm_type;
-	}
-
-	if (!m_pPCA)
-	{
-		if (!readPCAdata())
-			return;
-	}
-
-	int startFrame = ui.sliderFrame->value();
-	int endFrame = /*m_pAviManager->getFrameCount() - 1;*/startFrame;
-	//int startFrame = ui.sliderFrame->value();
-	//int endFrame = startFrame;
-	int width = m_pAviManager->getWidth();
-	int height = m_pAviManager->getHeight();
-
-	cv::Mat gradDir, gradMag, lbpMat;
-	//for (unsigned int frame = 0; frame < m_pAviManager->getFrameCount(); ++frame)
-	for (unsigned int frame = startFrame; frame <= endFrame; ++frame)
-	{
-		QString msg = QString("Detecting in (%1/%2)...").arg(frame).arg(m_pAviManager->getFrameCount()); 
-		m_executeStatus.setText(msg);
-		qApp->processEvents();
-
-		cv::Mat frameImage = m_pAviManager->getImage(frame);
-		cv::Mat grayImage, checkImage, cannyImage;
-		cv::Rect halfRect(0, height / 2, width, height / 4);
-		cv::cvtColor(frameImage(halfRect), grayImage, CV_BGR2GRAY);
-		cv::cvtColor(grayImage, checkImage, CV_GRAY2RGB);
-
-		Detector::calcGrad(grayImage, gradDir, gradMag);
-		Detector::extractLBP(grayImage, lbpMat);
-
-		cv::Canny(grayImage, cannyImage, 50, 150);
-
-		int step = 6;
-		std::vector<float> featLBP, feat;
-		for (int y = Detector::TemplateHalfHeight; y < height / 4 - Detector::TemplateHalfHeight - 1; y += step)
-		{
-			for (int x = Detector::TemplateHalfWidth; x < width - Detector::TemplateHalfWidth - 1; x += step)
-			{
-				qDebug() << x << y;
-
-				cv::Rect sampleRect(x - Detector::TemplateHalfWidth, y - Detector::TemplateHalfHeight, 
-						Detector::TemplateWidth, Detector::TemplateHeight);
-
-				int nonZero = cv::countNonZero(cannyImage(sampleRect));
-				if (nonZero < 100)
-					continue;
-
-				Detector::getHoG_partial(gradDir, gradMag, x, y, feat);
-				Detector::getLBP_partial(lbpMat, x, y, featLBP);
-
-				int featSize = feat.size();
-				feat.resize(featSize + featLBP.size());
-				for (int i = 0; i < featLBP.size(); ++i)
-					feat[featSize + i] = featLBP[i];
-
-				// PCA による次元圧縮
-				cv::Mat src(1, feat.size(), CV_32FC1, &(feat[0]));
-				cv::Mat result = m_pPCA->project(src);
-
-				CvMat m;
-				cvInitMatHeader (&m, 1, result.cols, CV_32FC1, result.data);
-				if (m_svm->predict(&m))
-				{
-					qDebug() << "Found" << x << y;
-					cv::rectangle(checkImage, sampleRect, CV_RGB(255, 0, 0));
-				}
-			}
-		}
-		cv::namedWindow("Heads");
-		cv::imshow("Heads", checkImage);
-		cv::waitKey(10);
-	}
-
-	m_executeStatus.clear();
-}
-
-void QtHOG::on_actionShrink_Tracking_Data_triggered()
-{
-	return;
-
-	QString selFilter = "";
-	QString fileName = QFileDialog::getOpenFileName(this,
-													tr("Tracking data"), QDir::currentPath(),
-													tr("Tracking data file (*.trk);;All files (*.*)"), &selFilter
-													);
-
-	if (fileName.isEmpty())
-		return;
-
-	QFileInfo fileInfo(fileName);
-	QString filePath = fileInfo.path();
-	QString fileBase = fileInfo.baseName();
-	QString fileExt = fileInfo.suffix();
-
-	QString outFile = filePath + "\\" + fileBase + "_shrink.trk";
-
-    FILE *fp;
-	fp = ::fopen(fileName.toLocal8Bit(), "r");
-    if (NULL == fp)
-        return;
-
-	FILE *out_fp;
-	out_fp = ::fopen(outFile.toLocal8Bit(), "w");
-	if (NULL == out_fp)
-		return;
-
-    int point;
-    int frame;
-	double px, py;
-	unsigned int flags;
-	//int lineCount;
-
-	while (EOF != ::fscanf(fp, "%d %d %lf %lf %d", &point, &frame, &px, &py, &flags))
-    {
-		//iterator<STrack> ittrack = insert(cam, frame, point, px, py, flags);
-		::fprintf(out_fp, "%d %d %18.18f %18.18f %d\n", point, frame / 2, px, py, flags);
-    }
-    ::fclose(fp);
-	::fclose(out_fp);
-}
-
 void QtHOG::onCameraChange()
 {
 	setCameraNo(this->m_curCamera+1);
@@ -5165,45 +3164,21 @@ void QtHOG::setCameraNo(int cameraNo)
 
 void QtHOG::InitializeParameters()
 {
-	TCHAR exePath[MAX_PATH];
-	TCHAR drive[_MAX_DRIVE];
-	TCHAR dir[_MAX_DIR];
-	TCHAR fname[_MAX_FNAME];
-	::GetModuleFileName(NULL, exePath, MAX_PATH);
-	_tsplitpath(exePath, drive, dir, fname, NULL);
-	PWSTR pszPath;
-	::SHGetKnownFolderPath(FOLDERID_Documents, 0, NULL, &pszPath);
-	TCHAR	documentDir[MAX_PATH];
-	_stprintf_s(documentDir, L"%s\\%s", pszPath, fname);
-	_tmkdir(documentDir);
-
 	TCHAR	filepath[MAX_PATH];
-	_stprintf(filepath, L"%s\\%s.ini", documentDir, fname);
-	TCHAR	localDir[MAX_PATH];
-	::SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &pszPath);
-	_stprintf_s(localDir, L"%s\\%s", pszPath, fname);
-	if (!PathFileExists(filepath))
-	{
-		TCHAR	IniFilepath[MAX_PATH];
-		_stprintf(IniFilepath, L"%s\\%s.ini", localDir, fname);
-		if (PathFileExists(IniFilepath))
-			CopyFile(IniFilepath, filepath, TRUE);
-	}
-
-
+	getInitialFileName(filepath);
 	TCHAR	buf[256];
 	// QtHOGのパラメータ
 	m_PredictSearchRange = GetPrivateProfileInt(_T("MASKING_TOOL"), _T("PREDICT_SEARCH_RANGE"), 40, filepath);
 	m_InitialSearchRange = GetPrivateProfileInt(_T("MASKING_TOOL"), _T("INITIAL_SEARCH_RANGE"), 80, filepath);
 	m_ResizeWidth = GetPrivateProfileInt(_T("MASKING_TOOL"), _T("RESIZE_WIDTH"), 2000, filepath);
 	m_ResizeHeight = GetPrivateProfileInt(_T("MASKING_TOOL"), _T("RESIZE_HEIGHT"), 1000, filepath);
-	GetPrivateProfileString(_T("MASKING_TOOL"), _T("DETECT_METHOD"), _T("HOG"), buf, sizeof(buf), filepath);
-	if (_tcscmp(buf, _T("HOG"))==0)
-		m_detectMethod = Constants::DetectMethod::HOG;
-	else if (_tcscmp(buf, _T("SECUWATCHER"))==0)
-		m_detectMethod = Constants::DetectMethod::SECUWATCHER;
+	GetPrivateProfileString(_T("MASKING_TOOL"), _T("DETECT_METHOD"), _T("EXTERNAL"), buf, sizeof(buf), filepath);
+	if (_tcscmp(buf, _T("SECUWATCHER"))==0)
+		m_detectMethod = Constants::DetectMethod::EXTERNAL;
+	else if (_tcscmp(buf, _T("EXTERNAL"))==0)
+		m_detectMethod = Constants::DetectMethod::EXTERNAL;
 	else
-		m_detectMethod = Constants::DetectMethod::HOG;
+		m_detectMethod = Constants::DetectMethod::EXTERNAL;
 
 	GetPrivateProfileString(_T("MASKING_TOOL"), _T("IMAGE_TYPE"), _T("PANORAMIC"), buf, sizeof(buf), filepath);
 	if (_tcscmp(buf, _T("PANORAMIC"))==0)
@@ -5212,7 +3187,7 @@ void QtHOG::InitializeParameters()
 		m_imageType = Constants::ImageType::PERSPECTIVE;
 	else
 	{
-		if (m_detectMethod == Constants::DetectMethod::SECUWATCHER)
+		if (m_detectMethod == Constants::DetectMethod::EXTERNAL)
 			m_imageType = Constants::ImageType::PERSPECTIVE;
 		else
 			m_imageType = Constants::ImageType::PANORAMIC;
@@ -5229,27 +3204,36 @@ void QtHOG::InitializeParameters()
 	GetPrivateProfileString(_T("MASKING_TOOL"), _T("FACE_THRESHOLD"), _T("2.0"), buf, sizeof(buf), filepath);
 	m_FaceThreshold = _tcstod(buf, NULL);
 
-	// SecuwatcherMask
-	GetPrivateProfileString(_T("SECUWATCHER_MASK"), _T("CHILD_PROCESS_NAME"), _T("SecuwatcherMaskDLL.exe"), m_childProcName, sizeof(m_childProcName), filepath);
-	m_detectParam.model[secuwatcher_access::MODEL_FACE].valid = (GetPrivateProfileInt(_T("SECUWATCHER_MASK"), _T("USE_FACE_MODEL"), 0, filepath) != 0);
-	m_detectParam.model[secuwatcher_access::MODEL_PLATE].valid = (GetPrivateProfileInt(_T("SECUWATCHER_MASK"), _T("USE_PLATE_MODEL"), 0, filepath) != 0);
-	m_detectParam.model[secuwatcher_access::MODEL_PERSON].valid = (GetPrivateProfileInt(_T("SECUWATCHER_MASK"), _T("USE_PERSON_MODEL"), 0, filepath) != 0);
+	// external process
+	GetPrivateProfileString(_T("DETECTOR"), _T("CHILD_PROCESS_NAME"), _T("DNNDetector.exe"), m_childProcName, sizeof(m_childProcName), filepath);
+}
 
-	TCHAR modelFilename[MAX_PATH];
-	GetPrivateProfileString(_T("SECUWATCHER_MASK"), _T("FACE_CFG"), _T("face_network.wkit"), modelFilename, MAX_PATH, filepath);
-	_stprintf_s(m_detectParam.model[secuwatcher_access::MODEL_FACE].cfgFilename, L"%s\\%s", localDir, modelFilename);
-	GetPrivateProfileString(_T("SECUWATCHER_MASK"), _T("PLATE_CFG"), _T("plate_network.wkit"), modelFilename, MAX_PATH, filepath);
-	_stprintf_s(m_detectParam.model[secuwatcher_access::MODEL_PLATE].cfgFilename, L"%s\\%s", localDir, modelFilename);
-	GetPrivateProfileString(_T("SECUWATCHER_MASK"), _T("PERSON_CFG"), _T("person_network.wkit"), modelFilename, MAX_PATH, filepath);
-	_stprintf_s(m_detectParam.model[secuwatcher_access::MODEL_PERSON].cfgFilename, L"%s\\%s", localDir, modelFilename);
-	GetPrivateProfileString(_T("SECUWATCHER_MASK"), _T("FACE_WEIGHT"), _T("face_model.wkit"), modelFilename, MAX_PATH, filepath);
-	_stprintf_s(m_detectParam.model[secuwatcher_access::MODEL_FACE].weightFilename, L"%s\\%s", localDir, modelFilename);
-	GetPrivateProfileString(_T("SECUWATCHER_MASK"), _T("PLATE_WEIGHT"), _T("plate_model.wkit"), modelFilename, MAX_PATH, filepath);
-	_stprintf_s(m_detectParam.model[secuwatcher_access::MODEL_PLATE].weightFilename, L"%s\\%s", localDir, modelFilename);
-	GetPrivateProfileString(_T("SECUWATCHER_MASK"), _T("PERSON_WEIGHT"), _T("person_model.wkit"), modelFilename, MAX_PATH, filepath);
-	_stprintf_s(m_detectParam.model[secuwatcher_access::MODEL_PERSON].weightFilename, L"%s\\%s", localDir, modelFilename);
-	GetPrivateProfileString(_T("SECUWATCHER_MASK"), _T("DEEPLEARNING_THRESHOLD"), _T("0.2"), buf, sizeof(buf), filepath);
-	m_detectParam.DL_thresh = _tcstod(buf, NULL);
+void QtHOG::getInitialFileName(wchar_t *filepath)
+{
+	TCHAR exePath[MAX_PATH];
+	TCHAR drive[_MAX_DRIVE];
+	TCHAR dir[_MAX_DIR];
+	TCHAR fname[_MAX_FNAME];
+	::GetModuleFileName(NULL, exePath, MAX_PATH);
+	_tsplitpath(exePath, drive, dir, fname, NULL);
+	PWSTR pszPath;
+	::SHGetKnownFolderPath(FOLDERID_Documents, 0, NULL, &pszPath);
+	TCHAR	documentDir[MAX_PATH];
+	_stprintf_s(documentDir, L"%s\\%s", pszPath, fname);
+	_tmkdir(documentDir);
+
+	_stprintf(filepath, L"%s\\%s.ini", documentDir, fname);
+	TCHAR	localDir[MAX_PATH];
+	::SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &pszPath);
+	_stprintf_s(localDir, L"%s\\%s", pszPath, fname);
+	if (!PathFileExists(filepath))
+	{
+		TCHAR	IniFilepath[MAX_PATH];
+		_stprintf(IniFilepath, L"%s\\%s.ini", localDir, fname);
+		if (PathFileExists(IniFilepath))
+			CopyFile(IniFilepath, filepath, TRUE);
+	}
+
 }
 
 void QtHOG::updateSelectNum()
